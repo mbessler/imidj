@@ -547,11 +547,11 @@ int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * chunk_r
             if (g_hash_table_contains(chunk_refcnt_table, gb_key)) {
                 /* increment by 1 */
                 g_hash_table_replace(chunk_refcnt_table, gb_key,
-                                     GINT_TO_POINTER(
-                                         GPOINTER_TO_INT(g_hash_table_lookup(chunk_refcnt_table, gb_key)) + 1
+                                     (void *)(
+                                         (long)(g_hash_table_lookup(chunk_refcnt_table, gb_key)) + 1
                                          ));
             } else {
-                g_hash_table_insert(chunk_refcnt_table, gb_key, GINT_TO_POINTER(1));
+                g_hash_table_insert(chunk_refcnt_table, gb_key, (void *)(long)(1));
             }
         }
 
