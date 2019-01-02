@@ -193,7 +193,7 @@ gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArray *chu
     if(opt_verbose) { g_print("signature check: ok\n"); }
 
     ret = read(tchidx, hdr, sizeof(chidx_header_t));
-    if(opt_verbose) { g_print("     -> read header (%d bytes) sizeof=%ld\n", ret, sizeof(chidx_header_t));}
+    if(opt_verbose) { g_print("     -> read header (%d bytes) sizeof=%zd\n", ret, sizeof(chidx_header_t));}
     if (ret < 0) {
         g_printerr("read error in index file '%s' during header read: %s\n", chidx_filename, g_strerror(errno));
         exit(13);
@@ -235,7 +235,7 @@ gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArray *chu
         record->num = i;
         record->offset = offset;
         ssize_t record_read_size = sizeof(record->chunk_record);
-        if (opt_verbose && i==0) { g_print("chunk record read size: %ld \n", record_read_size);}
+        if (opt_verbose && i==0) { g_print("chunk record read size: %zd \n", record_read_size);}
         ret = read(tchidx, &(record->chunk_record), record_read_size);
         if (ret < 0) {
             g_printerr("read error in index file '%s' at %d: %s\n", chidx_filename, offset, g_strerror(errno));
@@ -322,8 +322,8 @@ gboolean decompress(int infd, int outfd) {
 
     lzma_action action = LZMA_RUN;
 
-    uint8_t inbuf[8192];
-    uint8_t outbuf[8192];
+    uint8_t inbuf[1024*128];
+    uint8_t outbuf[1024*128];
     lz_strm.next_in = NULL;
     lz_strm.avail_in = 0;
     lz_strm.next_out = outbuf;
@@ -417,7 +417,7 @@ ssize_t compress(int outfd, uint8_t * data, int len) {
     }
 
     lzma_action action = LZMA_RUN;
-    uint8_t outbuf[8192];
+    uint8_t outbuf[1024*128];
     lz_strm.next_in = data;
     lz_strm.avail_in = len;
     lz_strm.next_out = outbuf;
@@ -477,7 +477,7 @@ uint8_t * whole_file_checksum(char * filename) {
     MD5_CTX mdctx;
     MD5_Init(&mdctx);
 
-    const ssize_t readsize = 8192;
+    const ssize_t readsize = 256*1024;
     while (1) {
         uint8_t buf[readsize];
         ssize_t num_read = read(fd, buf, readsize);
@@ -546,12 +546,16 @@ int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * chunk_r
             GBytes * gb_key = g_bytes_new(digest, MD5_DIGEST_LENGTH);
             if (g_hash_table_contains(chunk_refcnt_table, gb_key)) {
                 /* increment by 1 */
-                g_hash_table_replace(chunk_refcnt_table, gb_key,
-                                     (void *)(
-                                         (long)(g_hash_table_lookup(chunk_refcnt_table, gb_key)) + 1
-                                         ));
+                long * val = (long *)(g_hash_table_lookup(chunk_refcnt_table, gb_key));
+                *val += 1;
+                //g_hash_table_replace(chunk_refcnt_table, gb_key,
+                //                     (void *)(
+                //                         (long)(g_hash_table_lookup(chunk_refcnt_table, gb_key)) + 1
+                //                         ));
             } else {
-                g_hash_table_insert(chunk_refcnt_table, gb_key, (void *)(long)(1));
+                long * val = malloc(sizeof(long));
+                *val = 1;
+                g_hash_table_insert(chunk_refcnt_table, gb_key, val);
             }
         }
 
@@ -631,7 +635,7 @@ int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_records
             ssize_t total_written = 0;
 #ifdef LZMA
             total_written = compress(chblofd, chunk_data, record->chunk_record.l);
-            g_print("chunk of size %d compressed to %ld\n", record->chunk_record.l, total_written);
+            g_print("chunk of size %d compressed to %zd\n", record->chunk_record.l, total_written);
 #else
             for(int left_to_write=record->chunk_record.l; left_to_write > 0; ) {
                 int written = write(chblofd, chunk_data+pos, MIN(left_to_write, 8192));
@@ -644,7 +648,7 @@ int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_records
                 left_to_write -= written;
             }
 #endif /* LZMA */
-            g_print("wrote %ld bytes, expected %d\n", total_written, record->chunk_record.l);
+            g_print("wrote %zd bytes, expected %d\n", total_written, record->chunk_record.l);
             g_close(chblofd, NULL);
         }
 
@@ -745,11 +749,14 @@ int indexer_main(void)
     int total_chunks = 0;
     int unique_chunks = 0;
     GHashTableIter iter;
-    int tmpcount;
+    long tmpcount;
     g_hash_table_iter_init(&iter, chunk_refcnt_table);
-    while (g_hash_table_iter_next(&iter, NULL, (gpointer*) &tmpcount)) {
+    while (g_hash_table_iter_next(&iter, NULL,  (gpointer)&tmpcount)) {
+
         total_chunks += tmpcount;
         unique_chunks += 1;
+        g_print("total chunks now: %d   unique now %d\n", total_chunks, unique_chunks);
+
     }
     g_print("chunks total: %d  unique: %d\n", total_chunks, unique_chunks);
 
@@ -862,6 +869,7 @@ int patcher_main(int num_reference_images)
         reference_chunk_list[i] = g_ptr_array_new();
         parse_chidx(patcher_reference_index_array[i], &(reference_index_hdr[i]), reference_chunk_list[i]);
         /* check if MD5 from index matches reference image full file checksum */
+        g_print("checksumming image '%s' ...\n", patcher_reference_image_array[i]);
         uint8_t * reference_file_digest = whole_file_checksum(patcher_reference_image_array[i]);
         if (memcmp(reference_index_hdr[i].fullfilehash, reference_file_digest, MD5_DIGEST_LENGTH) != 0) {
             g_printerr("checksum mismatch between reference image file and what index file says it should be:\n");
@@ -1021,7 +1029,10 @@ int patcher_main(int num_reference_images)
    }
 
     // truncate if img was larger that final size
-    ftruncate(tfd, imglen);
+    if (ftruncate(tfd, imglen) < 0) {
+        g_printerr("Warning, cannot truncate target image file '%s': %s\n", target_image_path, g_strerror(errno));
+    }
+
     close(tfd);
 
 index_done:

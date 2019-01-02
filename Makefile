@@ -5,12 +5,13 @@ LZMA_LIBS=$$(pkg-config --libs liblzma)
 LZMA_CFLAGS=-DLZMA=1
 endif
 
-CFLAGS = -Werror -Wall -pedantic -std=gnu99 -g
+CFLAGS ?= -g
+CFLAGS += -Werror -Wall -pedantic -std=gnu99
 
 all: imidj
 
 imidj: imidj.o chunker.o
-	$(CC) $(CFLAGS) -o $@ $^ $$(pkg-config --libs glib-2.0) $$(pkg-config libcrypto --libs) $(LZMA_LIBS) $$(pkg-config --libs libcurl)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $$(pkg-config --libs glib-2.0) $$(pkg-config libcrypto --libs) $(LZMA_LIBS) $$(pkg-config --libs libcurl)
 
 chunker.o: chunker.c
 	$(CC) $(CFLAGS) -c $< -o $@ 
