@@ -20,3 +20,7 @@ imidj.o: main.c
 
 clean:
 	rm -f *.o imidj
+
+install:
+	install -d -m 0755 $(DESTDIR)/usr/bin
+	install -m 0755 imidj $(DESTDIR)/usr/bin/
