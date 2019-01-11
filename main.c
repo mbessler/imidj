@@ -86,6 +86,27 @@ typedef struct {
     uint64_t offset;
 } chidx_chunk_record_t;
 
+typedef struct {
+    unsigned int chunks_fetched;
+    unsigned int chunks_local;
+    size_t bytes_fetched;
+    size_t bytes_fetched_actual;
+    size_t bytes_local;
+
+    unsigned int chunks_already_present;
+    size_t bytes_already_present;
+} imidj_patch_stats_t;
+
+imidj_patch_stats_t patch_stats = {
+    .chunks_fetched = 0,
+    .chunks_local = 0,
+    .bytes_fetched = 0,
+    .bytes_fetched_actual = 0,
+    .bytes_local = 0,
+    .chunks_already_present = 0,
+    .bytes_already_present = 0 };
+
+
 static gboolean indexer_index_only = FALSE;
 static gboolean indexer_force_overwrite = FALSE;
 static gchar** indexer_rest = NULL;
@@ -304,7 +325,7 @@ static int write_chunkindex_header(int fd, uint8_t * filehash) {
 }
 
 #ifdef LZMA
-static gboolean decompress(int infd, int outfd) {
+static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
     lzma_stream lz_strm = LZMA_STREAM_INIT;
     lzma_ret lz_ret = lzma_stream_decoder(&lz_strm, UINT64_MAX, LZMA_TELL_ANY_CHECK | LZMA_TELL_NO_CHECK);
     if (lz_ret != LZMA_OK) {
@@ -331,6 +352,9 @@ static gboolean decompress(int infd, int outfd) {
     lz_strm.next_out = outbuf;
     lz_strm.avail_out = sizeof(outbuf);
     gboolean ineof = FALSE;
+    if (ret_compressed_size) {
+        *ret_compressed_size = 0;
+    }
 
     while (1) {
         if (lz_strm.avail_in == 0 && ! ineof) {
@@ -343,6 +367,9 @@ static gboolean decompress(int infd, int outfd) {
                 exit(56);
             }
             lz_strm.avail_in = num_read;
+            if (ret_compressed_size) {
+                *ret_compressed_size += num_read;
+            }
 
             // if input EOF, set LZMA_FINISH
             if (ineof){
@@ -604,7 +631,7 @@ static int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_
             g_printerr("memory allocation error at %s:%d\n", __FILE__, __LINE__);
             exit(9);
         }
-        if (read(imgfd, chunk_data, record->chunk_record.l) != record->chunk_record.l) {
+        if (read(imgfd, chunk_data, record->chunk_record.l) != (ssize_t)record->chunk_record.l) {
             g_printerr("could not read chunk from image file for writing to chunk store '%s': %s\n", img_filename, g_strerror(errno));
             exit(41);
         }
@@ -819,6 +846,45 @@ static size_t receive_data_from_curl(void *buffer, size_t size, size_t nmemb, vo
     return size*nmemb;
 }
 
+static void patcher_stats_to_json(void)
+{
+    if(! patcher_stats_out) {
+        return;
+    }
+    int fd = g_open(patcher_stats_out, O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+    if (fd < 0) {
+        g_printerr("Cannot create/write json stats file '%s': %s\n", patcher_stats_out, g_strerror(errno));
+        return;
+    }
+    const unsigned int jsonlen = 1024;
+    char s[jsonlen];
+    int l = snprintf(s, jsonlen,
+                     "{"                                \
+                     "    \"chunks_fetched\": %d,"          \
+                     "    \"chunks_local\": %d,"            \
+                     "    \"bytes_fetched\": %zd,"           \
+                     "    \"bytes_fetched_actual\": %zd,"    \
+                     "    \"bytes_local\": %zd,"             \
+                     "    \"chunks_already_present\": %d,"  \
+                     "    \"bytes_already_present )\": %zd"  \
+                     "}",
+             patch_stats.chunks_fetched,
+             patch_stats.chunks_local,
+             patch_stats.bytes_fetched,
+             patch_stats.bytes_fetched_actual,
+             patch_stats.bytes_local,
+             patch_stats.chunks_already_present,
+             patch_stats.bytes_already_present );
+    if (write(fd, s ,l) < 0) {
+        g_printerr("Cannot write to json stats file '%s': %s\n", patcher_stats_out, g_strerror(errno));
+        close(fd);
+        return;
+    }
+    close(fd);
+    return;
+}
+
+
 static int patcher_main(int num_reference_images)
 {
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
@@ -901,7 +967,11 @@ static int patcher_main(int num_reference_images)
         /* first, checksum of whole file, maybe we can avoid indexing it if its already complete */
         uint8_t * wholefile_digest = whole_file_checksum(target_image_path);
         if (memcmp(wholefile_digest, target_index_hdr.fullfilehash, MD5_DIGEST_LENGTH) == 0) {
-            /* done */
+            /* compute stats */
+            chidx_chunk_record_t * target_record = g_ptr_array_index(target_chunk_list, target_chunk_list->len - 1);
+            patch_stats.bytes_already_present += target_record->offset + target_record->chunk_record.l;
+            patch_stats.chunks_already_present = target_chunk_list->len;
+            /* image already complete, so we're done */
             goto index_done;
         }
         /* index target image */
@@ -940,6 +1010,8 @@ static int patcher_main(int num_reference_images)
             chidx_chunk_record_t * target_asis_record = g_ptr_array_index(target_asis_chunk_list, i);
             if (memcmp(target_record->chunk_record.chunkhash, target_asis_record->chunk_record.chunkhash, MD5_DIGEST_LENGTH) == 0) {
                 g_print("chunk %d already correct in target image\n", i);
+                patch_stats.bytes_already_present += target_record->chunk_record.l;
+                patch_stats.chunks_already_present += 1;
                 continue;
             }
         }
@@ -979,6 +1051,9 @@ static int patcher_main(int num_reference_images)
                     }
                     free(chunk_data);
                     chunk_found_in_ref = TRUE;
+                    /* update stats */
+                    patch_stats.chunks_local += 1;
+                    patch_stats.bytes_local += l;
                     break;
                 }
             }
@@ -992,6 +1067,7 @@ static int patcher_main(int num_reference_images)
 
         /* otherwise download the chunk from the remote chunk store */
         gchar * hexdigest = hexlify_md5(target_record->chunk_record.chunkhash);
+        int chunk_compressed_size;
         if(url_is_local) {
             int chblo_fd = -1;
             gchar * chblo_path = g_strdup_printf("%s/chunks/%02x/%s.chblo.xz", patcher_url, target_record->chunk_record.chunkhash[0], hexdigest);
@@ -1000,9 +1076,12 @@ static int patcher_main(int num_reference_images)
                 g_printerr("could not open chblo '%s': %s\n", chblo_path, g_strerror(errno));
                 exit(70);
             }
-            decompress(chblo_fd, tfd);
+
+            decompress(chblo_fd, tfd, &chunk_compressed_size);
+            patch_stats.bytes_fetched += target_record->chunk_record.l;
+            patch_stats.bytes_fetched_actual += chunk_compressed_size;
             g_free(chblo_path);
-            continue;
+            //continue;
         } else { /* remote url */
             gchar tmpfilename[] = "/tmp/.chblo.XXXXXX";
             gchar * chblo_url = g_strdup_printf("%s/chunks/%02x/%s.chblo.xz", patcher_url, target_record->chunk_record.chunkhash[0], hexdigest);
@@ -1038,6 +1117,9 @@ static int patcher_main(int num_reference_images)
     }
 
     close(tfd);
+
+    /* write a json file with stats of the patching operation */
+    patcher_stats_to_json();
 
 index_done:
     // todo free target_chunk_list
