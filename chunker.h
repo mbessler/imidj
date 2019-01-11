@@ -22,7 +22,7 @@ typedef enum {
 } chunker_error_t;
 
 typedef struct {
-    ssize_t len;
+    size_t len;
     chunker_error_t error;
     uint8_t * data;
 } raw_chunk_w_size_t;

@@ -138,7 +138,7 @@ GOptionEntry patcher_entries[] = {
     {0}
 };
 
-void usage(GOptionContext *context) {
+static void usage(GOptionContext *context) {
     g_autofree gchar *text = NULL;
     text = g_option_context_get_help(context, FALSE, NULL);
     g_print("Copyright (C) 2019 by Manuel Bessler\n" \
@@ -149,11 +149,13 @@ void usage(GOptionContext *context) {
 
 static gboolean version_main(int argc, char **argv)
 {
+    (void) argc;
+    (void) argv;
     g_print(VERSION "\n");
     exit(1);
 }
 
-gchar * hexlify_md5(uint8_t digest[16]) {
+static gchar * hexlify_md5(uint8_t digest[16]) {
     gchar * hexdigest = calloc(1, MD5_DIGEST_LENGTH*2+1);
     if (hexdigest == NULL) {
         g_printerr("memory allocation failed: %s\n", g_strerror(errno));
@@ -167,7 +169,7 @@ gchar * hexlify_md5(uint8_t digest[16]) {
     return(hexdigest);
 }
 
-gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArray *chunk_list) {
+static gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArray *chunk_list) {
     if(opt_verbose) { g_print("loading chidx '%s'...\n", chidx_filename); }
     int tchidx = g_open(chidx_filename, O_RDONLY);
     if (tchidx < 0) {
@@ -177,7 +179,7 @@ gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArray *chu
     /* check file magic */
     int siglen = strlen("CHiDX");
     char buf[siglen+1];
-    int ret = read(tchidx, buf, siglen);
+    ssize_t ret = read(tchidx, buf, siglen);
     if (ret < 0) {
         g_printerr("read error in index file '%s' during signature read: %s\n", chidx_filename, g_strerror(errno));
         exit(11);
@@ -193,7 +195,7 @@ gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArray *chu
     if(opt_verbose) { g_print("signature check: ok\n"); }
 
     ret = read(tchidx, hdr, sizeof(chidx_header_t));
-    if(opt_verbose) { g_print("     -> read header (%d bytes) sizeof=%zd\n", ret, sizeof(chidx_header_t));}
+    if(opt_verbose) { g_print("     -> read header (%zd bytes) sizeof=%zd\n", ret, sizeof(chidx_header_t));}
     if (ret < 0) {
         g_printerr("read error in index file '%s' during header read: %s\n", chidx_filename, g_strerror(errno));
         exit(13);
@@ -269,7 +271,7 @@ gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArray *chu
 }
 
 
-int write_chunkindex_header(int fd, uint8_t * filehash) {
+static int write_chunkindex_header(int fd, uint8_t * filehash) {
     if (write(fd, "CHiDX", 5) <= 0) {
         g_printerr("error while trying to write chunk index file header: %s", g_strerror(errno));
         exit(40);
@@ -302,7 +304,7 @@ int write_chunkindex_header(int fd, uint8_t * filehash) {
 }
 
 #ifdef LZMA
-gboolean decompress(int infd, int outfd) {
+static gboolean decompress(int infd, int outfd) {
     lzma_stream lz_strm = LZMA_STREAM_INIT;
     lzma_ret lz_ret = lzma_stream_decoder(&lz_strm, UINT64_MAX, LZMA_TELL_ANY_CHECK | LZMA_TELL_NO_CHECK);
     if (lz_ret != LZMA_OK) {
@@ -330,17 +332,17 @@ gboolean decompress(int infd, int outfd) {
     lz_strm.avail_out = sizeof(outbuf);
     gboolean ineof = FALSE;
 
-    //ssize_t total_written = 0;
     while (1) {
         if (lz_strm.avail_in == 0 && ! ineof) {
             lz_strm.next_in = inbuf;
-            lz_strm.avail_in = read(infd, inbuf, sizeof(inbuf));
-            if (lz_strm.avail_in == 0) {
+            ssize_t num_read = read(infd, inbuf, sizeof(inbuf));
+            if (num_read == 0) {
                 ineof = TRUE;
-            } else if (lz_strm.avail_in < 0) {
+            } else if (num_read < 0) {
                 g_printerr("error reading from chblo file: %s\n", g_strerror(errno));
                 exit(56);
             }
+            lz_strm.avail_in = num_read;
 
             // if input EOF, set LZMA_FINISH
             if (ineof){
@@ -350,7 +352,7 @@ gboolean decompress(int infd, int outfd) {
 
         lz_ret = lzma_code(&lz_strm, action);
         if (lz_strm.avail_out == 0 || lz_ret == LZMA_STREAM_END) {
-            size_t write_size = sizeof(outbuf) - lz_strm.avail_out;
+            ssize_t write_size = sizeof(outbuf) - lz_strm.avail_out;
             if (write(outfd, outbuf, write_size) != write_size) {
                 g_printerr("error writing chunk block to image: %s\n", g_strerror(errno));
                 exit(57);
@@ -394,7 +396,7 @@ gboolean decompress(int infd, int outfd) {
 }
 
 
-ssize_t compress(int outfd, uint8_t * data, int len) {
+static size_t compress(int outfd, uint8_t * data, int len) {
     uint32_t lz_preset = 6; // 6 since any higher than 6 requires a lot more memory during decompress on the target
     lzma_stream lz_strm = LZMA_STREAM_INIT;
     lzma_ret lz_ret;
@@ -423,12 +425,12 @@ ssize_t compress(int outfd, uint8_t * data, int len) {
     lz_strm.next_out = outbuf;
     lz_strm.avail_out = sizeof(outbuf);
 
-    ssize_t total_written = 0;
+    size_t total_written = 0;
     while (1) {
         action = LZMA_FINISH; /* since we're giving it the whole buffer */
         lz_ret = lzma_code(&lz_strm, action);
         if (lz_strm.avail_out == 0 || lz_ret == LZMA_STREAM_END) {
-            size_t write_size = sizeof(outbuf) - lz_strm.avail_out;
+            ssize_t write_size = sizeof(outbuf) - lz_strm.avail_out;
             if (write(outfd, outbuf, write_size) != write_size) {
                 g_printerr("error writing compressed chunk: %s\n", g_strerror(errno));
                 exit(52);
@@ -461,7 +463,7 @@ ssize_t compress(int outfd, uint8_t * data, int len) {
 }
 #endif /* LZMA */
 
-uint8_t * whole_file_checksum(char * filename) {
+static uint8_t * whole_file_checksum(char * filename) {
     /* checksum whole file */
     int fd = g_open(filename, O_RDONLY);
     if (fd < 0) {
@@ -477,7 +479,7 @@ uint8_t * whole_file_checksum(char * filename) {
     MD5_CTX mdctx;
     MD5_Init(&mdctx);
 
-    const ssize_t readsize = 256*1024;
+    const size_t readsize = 256*1024;
     while (1) {
         uint8_t buf[readsize];
         ssize_t num_read = read(fd, buf, readsize);
@@ -494,7 +496,7 @@ uint8_t * whole_file_checksum(char * filename) {
     return digest;
 }
 
-int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * chunk_refcnt_table) /* chunk_refcnt_table is optional, use NULL to ignore */
+static int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * chunk_refcnt_table) /* chunk_refcnt_table is optional, use NULL to ignore */
 {
     if (chunk_records == NULL) {
         g_printerr("chunk record table should not be NULL in %s:%d\n", __FILE__, __LINE__);
@@ -535,9 +537,9 @@ int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * chunk_r
         MD5_Final(digest, &mdctx);
 
         gchar hexdigest[MD5_DIGEST_LENGTH*2+1] = { 0};
-        for(int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+        for(int _i = 0; _i < MD5_DIGEST_LENGTH; _i++) {
             gchar hexdigit[3];
-            g_snprintf(hexdigit, 3, "%02x", digest[i]);
+            g_snprintf(hexdigit, 3, "%02x", digest[_i]);
             g_strlcat(hexdigest, hexdigit, MD5_DIGEST_LENGTH*2+1);
         }
         g_print("%s\n", hexdigest);
@@ -576,7 +578,7 @@ int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * chunk_r
     return(0);
 }
 
-int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_records)
+static int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_records)
 {
     g_assert(img_filename != NULL);
     g_assert(outputdir != NULL);
@@ -589,7 +591,7 @@ int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_records
         exit(32);
     }
 
-    for (int i = 0; i < chunk_records->len; i++)
+    for (unsigned int i = 0; i < chunk_records->len; i++)
     {
         chidx_chunk_record_t * record = g_ptr_array_index(chunk_records, i);
         /* read chunk from image */
@@ -632,13 +634,13 @@ int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_records
                 exit(39);
             }
 
-            ssize_t total_written = 0;
+            size_t total_written = 0;
 #ifdef LZMA
             total_written = compress(chblofd, chunk_data, record->chunk_record.l);
             g_print("chunk of size %d compressed to %zd\n", record->chunk_record.l, total_written);
 #else
             for(int left_to_write=record->chunk_record.l; left_to_write > 0; ) {
-                int written = write(chblofd, chunk_data+pos, MIN(left_to_write, 8192));
+                ssize_t written = write(chblofd, chunk_data+pos, MIN(left_to_write, 8192));
                 if (written < 0) {
                     g_printerr("error while writing chunk chblo '%s': %s\n", chblo_path, g_strerror(errno));
                     exit(40);
@@ -661,7 +663,7 @@ int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_records
 }
 
 
-int write_chidx(char * idx_filename, char * img_filename, uint8_t * wholefile_digest, GPtrArray *chunk_records) /* img_filename may be NULL if indexer_index_only is false */
+static int write_chidx(char * idx_filename, char * img_filename, uint8_t * wholefile_digest, GPtrArray *chunk_records) /* img_filename may be NULL if indexer_index_only is false */
 {
     g_print("writing chunkindex to '%s'\n", idx_filename);
     g_assert(idx_filename != NULL);
@@ -680,7 +682,7 @@ int write_chidx(char * idx_filename, char * img_filename, uint8_t * wholefile_di
     write_chunkindex_header(fd, wholefile_digest);
 
     /* iter over chunk records */
-    for (int i = 0; i < chunk_records->len; i++)
+    for (unsigned int i = 0; i < chunk_records->len; i++)
     {
         chidx_chunk_record_t * record = g_ptr_array_index(chunk_records, i);
         /* write chunk record to index file */
@@ -699,7 +701,7 @@ int write_chidx(char * idx_filename, char * img_filename, uint8_t * wholefile_di
     return(0);
 }
 
-int indexer_main(void)
+static int indexer_main(void)
 {
     char * image_path = realpath(indexer_image, NULL);
     if (image_path == NULL) g_printerr("image_path is NULL: %s\n", g_strerror(errno));
@@ -783,7 +785,7 @@ int indexer_main(void)
     return 0;
 }
 
-char * abspath_mkdir(gchar * relpath) {
+static char * abspath_mkdir(gchar * relpath) {
     /* if file exists, use realpath() */
     if (g_file_test(relpath, G_FILE_TEST_EXISTS)) {
         return realpath(relpath, NULL);
@@ -806,7 +808,7 @@ char * abspath_mkdir(gchar * relpath) {
     return(abspath);
 }
 
-size_t receive_data_from_curl(void *buffer, size_t size, size_t nmemb, void *userp)
+static size_t receive_data_from_curl(void *buffer, size_t size, size_t nmemb, void *userp)
 {
     int tempfd = *(int *)userp;
     //decompress_stream(buffer, size*nmemb, tfd);
@@ -817,7 +819,7 @@ size_t receive_data_from_curl(void *buffer, size_t size, size_t nmemb, void *use
     return size*nmemb;
 }
 
-int patcher_main(int num_reference_images)
+static int patcher_main(int num_reference_images)
 {
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
         g_printerr("libcurl init failed\n");
@@ -929,7 +931,7 @@ int patcher_main(int num_reference_images)
     }
 
     off_t imglen = 0;
-    for (int i = 0; i < target_chunk_list->len; i++)
+    for (unsigned int i = 0; i < target_chunk_list->len; i++)
     {
         chidx_chunk_record_t * target_record = g_ptr_array_index(target_chunk_list, i);
         imglen += target_record->chunk_record.l;
@@ -951,7 +953,7 @@ int patcher_main(int num_reference_images)
         /* next, check if the chunk exists in a local reference image */
         for(int r=0; r<num_reference_images; r++) {
             /* future optimization: use a hash to look up the index instead of iterating over list  */
-            for (int x = 0; x < reference_chunk_list[r]->len; x++) {
+            for (unsigned int x = 0; x < reference_chunk_list[r]->len; x++) {
                 chidx_chunk_record_t * reference_record = g_ptr_array_index(reference_chunk_list[r], x);
                 if(memcmp(target_record->chunk_record.chunkhash, reference_record->chunk_record.chunkhash, MD5_DIGEST_LENGTH) == 0) {
                     /* seek in reference image, read from reference, and insert chunk into target image */
@@ -959,7 +961,7 @@ int patcher_main(int num_reference_images)
                         g_printerr("Cannot seek reference image file '%s': %s\n", target_image_path, g_strerror(errno));
                         exit(70);
                     }
-                    ssize_t l = target_record->chunk_record.l;
+                    size_t l = target_record->chunk_record.l;
                     uint8_t * chunk_data = malloc(l);
                     if (chunk_data == NULL) {
                         g_printerr("memory allocation error at %s:%d\n", __FILE__, __LINE__);
@@ -1021,12 +1023,14 @@ int patcher_main(int num_reference_images)
                 exit(72);
             }
             lseek(tempfd, 0, SEEK_SET);
-            decompress(tempfd, tfd);
+            decompress(tempfd, tfd, &chunk_compressed_size);
+            patch_stats.bytes_fetched += target_record->chunk_record.l;
+            patch_stats.bytes_fetched_actual += chunk_compressed_size;
             close(tempfd);
             g_free(chblo_url);
         }
         g_free(hexdigest);
-   }
+    }
 
     // truncate if img was larger that final size
     if (ftruncate(tfd, imglen) < 0) {
@@ -1057,7 +1061,7 @@ index_done:
 }
 
 
-int patch_args(int argc, char ** argv)
+static int patch_args(int argc, char ** argv)
 {
     GOptionContext * context = g_option_context_new ("patch <IMAGE> <INDEX>");
     g_option_context_set_help_enabled(context, TRUE);
@@ -1143,7 +1147,7 @@ int patch_args(int argc, char ** argv)
     return(patcher_main(num_reference_images));
 }
 
-int index_args(int argc, char ** argv) {
+static int index_args(int argc, char ** argv) {
     GOptionContext * context = g_option_context_new ("index <IMAGE> <OUTDIR>");
     g_option_context_set_help_enabled(context, TRUE);
     g_option_context_add_main_entries(context, indexer_entries, NULL);

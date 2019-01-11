@@ -1,4 +1,5 @@
 WITH_LZMA ?= 1
+STRICT_COMPILE ?= 1
 
 ifeq ($(WITH_LZMA),1)
 LZMA_LIBS=$$(pkg-config --libs liblzma)
@@ -6,7 +7,31 @@ LZMA_CFLAGS=-DLZMA=1
 endif
 
 CFLAGS ?= -g
-CFLAGS += -Werror -Wall -pedantic -std=gnu99
+CFLAGS += -O3 -Wall -std=gnu99
+ifeq ($(STRICT_COMPILE),1)
+CFLAGS += -Werror -pedantic
+CFLAGS += -D_FORTIFY_SOURCE=2
+CFLAGS += -fstack-protector-strong
+CFLAGS += -fPIE -pie
+CFLAGS += -Wl,-z,noexecstack
+CFLAGS += -Wl,-z,relro
+CFLAGS += -Wl,-z,now
+CFLAGS += -fstrength-reduce -Wstrict-prototypes
+CFLAGS += -Wextra
+CFLAGS += -Wold-style-definition
+CFLAGS += -Wmissing-prototypes
+CFLAGS += -fno-common
+CFLAGS += -ffunction-sections -fdata-sections
+CFLAGS += -Wformat -Wformat-security -Werror=format-security
+CFLAGS += -Wno-parentheses
+CFLAGS += -Wmissing-declarations -Wmissing-include-dirs
+CFLAGS += -Wstrict-aliasing
+CFLAGS += -Winit-self
+CFLAGS += -pedantic-errors
+CFLAGS += -Wformat=2 -Wno-format-nonliteral -Wshadow -Wpointer-arith -Wcast-qual -Wmissing-prototypes -Wno-missing-braces
+CFLAGS += -Wswitch-default
+#CFLAGS += -Wswitch-enum
+endif # STRICT_COMPILE=1
 
 all: imidj
 

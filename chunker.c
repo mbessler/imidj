@@ -191,7 +191,7 @@ chunker_process(Chunker *c)
         }
     }
     sum = buzhash(c->data + c->position, window_size, c->table);
-    while(c->remaining > c->window_size && ((sum & chunk_mask) || n < min_size)) {
+    while((ssize_t)c->remaining > c->window_size && ((sum & chunk_mask) || n < (int32_t)min_size)) {
         sum = buzhash_update(sum, c->data[c->position],
                              c->data[c->position + window_size],
                              window_size, c->table);
