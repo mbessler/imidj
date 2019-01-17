@@ -380,8 +380,12 @@ static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
         lz_ret = lzma_code(&lz_strm, action);
         if (lz_strm.avail_out == 0 || lz_ret == LZMA_STREAM_END) {
             ssize_t write_size = sizeof(outbuf) - lz_strm.avail_out;
-            if (write(outfd, outbuf, write_size) != write_size) {
-                g_printerr("error writing chunk block to image: %s\n", g_strerror(errno));
+            ssize_t num_written = write(outfd, outbuf, write_size);
+            if (num_written < 0) {
+                g_printerr("error writing decompressed chunk block to image: %s\n", g_strerror(errno));
+                exit(57);
+            } else if (num_written != write_size) {
+                g_printerr("error short write while writing decompressed chunk block to image, expected: %zd, wrote: %zd\n", write_size, num_written);
                 exit(57);
             }
 
