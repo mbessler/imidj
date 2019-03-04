@@ -932,7 +932,7 @@ static int analyzer_main(void)
         g_print("Chunker Chuunk Mask: 0x%08x\n", index_hdr.chunkmask);
         g_print("Chunker Min Chunk Size: %d\n", index_hdr.minchunksize);
 
-        size_t chunk_min = 999999999999;
+        size_t chunk_min = SIZE_MAX;
         size_t chunk_max = 0;
 
         unsigned int num_chunks = 0;
