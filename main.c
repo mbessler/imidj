@@ -117,6 +117,8 @@ static gchar* patcher_index_file = NULL;
 static gchar* patcher_out_img = NULL;
 static gchar* patcher_url = NULL;
 static gboolean patcher_force_overwrite = FALSE;
+static gboolean patcher_skip_mismatched_refs = FALSE;
+static gboolean patcher_skip_verify = FALSE;
 static gchar** patcher_reference_index_array = NULL;
 static gchar** patcher_reference_image_array = NULL;
 static gchar* patcher_stats_out = NULL;
@@ -156,6 +158,8 @@ GOptionEntry patcher_entries[] = {
     {"stats-out", '\0', 0, G_OPTION_ARG_FILENAME, &patcher_stats_out, "Output JSON statistics to STATSFILE", "STATSFILE"},
     {"reference-index", 'r', 0, G_OPTION_ARG_FILENAME_ARRAY, &patcher_reference_index_array, "Index file for reference image (requires matching '-R'; can be specified zero or more times)", "INDEXFILE"},
     {"reference-image", 'R', 0, G_OPTION_ARG_FILENAME_ARRAY, &patcher_reference_image_array, "Existing image file as reference (requires matching '-r'; can be specified zero or more times) ", "IMAGEFILE"},
+    {"skip-mismatched-references", '\0', 0, G_OPTION_ARG_NONE, &patcher_skip_mismatched_refs, "Skip if a reference image mismatches its chunk index (instead of exit w/ error)", NULL},
+    {"skip-verify", '\0',  0, G_OPTION_ARG_NONE, &patcher_skip_verify, "Skip image checksum verification checksum after (re)building from chunks", NULL},
     {"verbose", 'v', 0, G_OPTION_ARG_NONE, &opt_verbose, "Increase output verbosity", NULL },
     /* general */
     {"version", 'V', 0, G_OPTION_ARG_NONE, &opt_version, "Show version information", NULL },
@@ -299,10 +303,10 @@ static gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArr
             g_print("Read Chunk Index [%d] size=%d hash=%s\n", i, record->chunk_record.l, hexdigest);
             g_free(hexdigest);
         }
-        
+
         i += 1;
         offset += record->chunk_record.l;
-        
+
         g_ptr_array_add(chunk_list, (gpointer)record);
     }
     g_print("chunk index file (%s) contains references to %d chunks\n", chidx_filename, i);
@@ -1038,7 +1042,14 @@ static int patcher_main(int num_reference_images)
             g_printerr("checksum mismatch between reference image file and what index file says it should be:\n");
             g_printerr("    checksum stored in index file '%s': %s\n", patcher_reference_index_array[i], hexlify_md5(reference_index_hdr[i].fullfilehash));
             g_printerr("    checksum of image file '%s': %s\n", patcher_reference_image_array[i], hexlify_md5(reference_file_digest));
-            exit(64); // this error could probably be ignored, by just not using this reference
+            if (! patcher_skip_mismatched_refs) {
+                /* mismatch of image and chunk-index, do not use this reference */
+                g_ptr_array_free(reference_chunk_list[i], TRUE);
+                reference_image_fds[i] = -1;
+                continue;
+            } else {
+                exit(64);
+            }
         }
         free(reference_file_digest);
 
@@ -1119,6 +1130,10 @@ static int patcher_main(int num_reference_images)
         gboolean chunk_found_in_ref = FALSE;
         /* next, check if the chunk exists in a local reference image */
         for(int r=0; r<num_reference_images; r++) {
+            /* skip reference image if its fd is -1 */
+            if (reference_image_fds[i] < 0) {
+                continue;
+            }
             /* future optimization: use a hash to look up the index instead of iterating over list  */
             for (unsigned int x = 0; x < reference_chunk_list[r]->len; x++) {
                 chidx_chunk_record_t * reference_record = g_ptr_array_index(reference_chunk_list[r], x);
@@ -1214,7 +1229,18 @@ static int patcher_main(int num_reference_images)
         g_printerr("Warning, cannot truncate target image file '%s': %s\n", target_image_path, g_strerror(errno));
     }
 
+    fsync(tfd);
     close(tfd);
+
+    if (! patcher_skip_verify) {
+        uint8_t * wholefile_digest = whole_file_checksum(target_image_path);
+        if (memcmp(wholefile_digest, target_index_hdr.fullfilehash, MD5_DIGEST_LENGTH) != 0) {
+            g_printerr("verify failed, checksum mismatch: expected %s, found %s\n", hexlify_md5(target_index_hdr.fullfilehash), hexlify_md5(wholefile_digest));
+        } else {
+            g_print("verify ok, image checksum is %s", hexlify_md5(wholefile_digest));
+        }
+        free(wholefile_digest);
+    }
 
     /* write a json file with stats of the patching operation */
     patcher_stats_to_json();
@@ -1233,7 +1259,9 @@ index_done:
     //TODO g_free reference_chunk_list[]
     /* close reference images */
     for(int i=0; i<num_reference_images; i++) {
-        g_close(reference_image_fds[i], NULL);
+        if (reference_image_fds[i] < 0) {
+            g_close(reference_image_fds[i], NULL);
+        }
     }
 
     curl_easy_cleanup(ceh);
