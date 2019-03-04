@@ -1236,6 +1236,7 @@ static int patcher_main(int num_reference_images)
         uint8_t * wholefile_digest = whole_file_checksum(target_image_path);
         if (memcmp(wholefile_digest, target_index_hdr.fullfilehash, MD5_DIGEST_LENGTH) != 0) {
             g_printerr("verify failed, checksum mismatch: expected %s, found %s\n", hexlify_md5(target_index_hdr.fullfilehash), hexlify_md5(wholefile_digest));
+            exit(73);
         } else {
             g_print("verify ok, image checksum is %s", hexlify_md5(wholefile_digest));
         }
