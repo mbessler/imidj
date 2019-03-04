@@ -123,6 +123,11 @@ static gchar* patcher_stats_out = NULL;
 static gchar** patcher_rest = NULL;
 static gboolean url_is_local = FALSE;
 
+static gchar* analyzer_index_file = NULL;
+static gboolean analyzer_dump_chunksums = FALSE;
+static gboolean analyzer_dump_not_header = FALSE;
+static gchar** analyzer_rest = NULL;
+
 static gboolean opt_verbose = FALSE;
 static gboolean opt_version = FALSE;
 CURL * ceh = NULL;
@@ -156,6 +161,20 @@ GOptionEntry patcher_entries[] = {
     {"version", 'V', 0, G_OPTION_ARG_NONE, &opt_version, "Show version information", NULL },
     /* remaining args */
     {G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &patcher_rest, NULL, NULL},
+    {0}
+};
+
+GOptionEntry analyzer_entries[] = {
+    /* imidj analyze --chunksums --no-header INDEX */
+
+    /* optional args */
+    {"chunksums", '\0', 0, G_OPTION_ARG_NONE, &analyzer_dump_chunksums, "Also dump the chunksums, not just the header", NULL},
+    {"no-header", '\0', 0, G_OPTION_ARG_NONE, &analyzer_dump_not_header, "Skip dumping the header, useful with --chunksums", NULL},
+    {"verbose", 'v', 0, G_OPTION_ARG_NONE, &opt_verbose, "Increase output verbosity", NULL },
+    /* general */
+    {"version", 'V', 0, G_OPTION_ARG_NONE, &opt_version, "Show version information", NULL },
+    /* remaining args */
+    {G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &analyzer_rest, NULL, NULL},
     {0}
 };
 
@@ -785,7 +804,7 @@ static int indexer_main(void)
     long tmpcount;
     g_hash_table_iter_init(&iter, chunk_refcnt_table);
     while (g_hash_table_iter_next(&iter, NULL,  (gpointer)&tmpcount)) {
-
+        // TODO fix: tmpcount isn't working right, either at set or retrieve here
         total_chunks += tmpcount;
         unique_chunks += 1;
         g_print("total chunks now: %d   unique now %d\n", total_chunks, unique_chunks);
@@ -888,6 +907,78 @@ static void patcher_stats_to_json(void)
     return;
 }
 
+static int analyzer_main(void)
+{
+    g_print("analyzing index '%s'\n", analyzer_index_file);
+
+    if (! g_file_test(analyzer_index_file, (G_FILE_TEST_EXISTS | G_FILE_TEST_IS_REGULAR))) {
+        g_printerr("index file not found: '%s'\n", analyzer_index_file);
+        exit(60);
+    }
+
+    char * index_path = realpath(analyzer_index_file, NULL);
+
+    /* load chunk index file */
+    GPtrArray *chunk_list = g_ptr_array_new();
+    chidx_header_t index_hdr;
+    parse_chidx(index_path, &index_hdr, chunk_list);
+    if (! analyzer_dump_not_header) {
+        g_print("Chunk Index File Format Version: %d\n", index_hdr.formatversion);
+        g_print("Chunker Window Size: 0x%08x\n", index_hdr.winsize);
+        g_print("Chunker Chuunk Mask: 0x%08x\n", index_hdr.chunkmask);
+        g_print("Chunker Min Chunk Size: %d\n", index_hdr.minchunksize);
+
+        size_t chunk_min = 999999999999;
+        size_t chunk_max = 0;
+
+        unsigned int num_chunks = 0;
+        off_t imglen = 0;
+        for (unsigned int i = 0; i < chunk_list->len; i++, num_chunks++)
+        {
+            chidx_chunk_record_t * record = g_ptr_array_index(chunk_list, i);
+            imglen += record->chunk_record.l;
+            if (record->chunk_record.l < chunk_min) {
+                chunk_min = record->chunk_record.l;
+            }
+            if (record->chunk_record.l > chunk_max) {
+                chunk_max = record->chunk_record.l;
+            }
+        }
+
+        g_print("Number of Chunks: %d\n", num_chunks);
+        g_print("Chunk Min Size: %zd\n", chunk_min);
+        g_print("Chunk Max Size: %zd\n", chunk_max);
+        /*  file checksum */
+        char * hexdigest = hexlify_md5(index_hdr.fullfilehash);
+        if (hexdigest==NULL) {
+            g_printerr("memory allocation error at %s:%d\n", __FILE__, __LINE__);
+            exit(9);
+        }
+        g_print("Image File Checksum: %s\n", hexdigest);
+        g_free(hexdigest);
+
+        g_print("Image File Size: %ld\n", imglen);
+    }
+
+
+    if (analyzer_dump_chunksums) {
+        off_t offset=0;
+        for (unsigned int i = 0; i < chunk_list->len; i++)
+        {
+            chidx_chunk_record_t * record = g_ptr_array_index(chunk_list, i);
+            gchar * hexdigest = hexlify_md5(record->chunk_record.chunkhash);
+            if (hexdigest==NULL) {
+                g_printerr("memory allocation error at %s:%d\n", __FILE__, __LINE__);
+                exit(9);
+            }
+            g_print("Chunk #%d offset=0x%08lx size=%d chunksum=%s\n", i, offset, record->chunk_record.l, hexdigest);
+            g_free(hexdigest);
+            offset +=record->chunk_record.l;
+        }
+    }
+
+    return (0);
+}
 
 static int patcher_main(int num_reference_images)
 {
@@ -1043,13 +1134,16 @@ static int patcher_main(int num_reference_images)
                         g_printerr("memory allocation error at %s:%d\n", __FILE__, __LINE__);
                         exit(9);
                     }
-                    int num_read = read(reference_image_fds[r], chunk_data, l);
+                    ssize_t num_read = read(reference_image_fds[r], chunk_data, l);
                     if (num_read < 0) {
                         g_printerr("read error while trying to extract chunk from reference image '%s': %s\n", patcher_reference_image_array[r], g_strerror(errno));
                         exit(71);
                     }
-                    int num_written = write(tfd, chunk_data, l);
+                    ssize_t num_written = write(tfd, chunk_data, l);
                     if (num_written < 0) {
+                        g_printerr("write error while inserting chunk into target image '%s': %s\n", target_image_path, g_strerror(errno));
+                        exit(72);
+                    } else if ((size_t)num_written != l) {
                         g_printerr("write error while inserting chunk into target image '%s': %s\n", target_image_path, g_strerror(errno));
                         exit(72);
                     }
@@ -1233,6 +1327,43 @@ static int patch_args(int argc, char ** argv)
     return(patcher_main(num_reference_images));
 }
 
+static int analyze_args(int argc, char ** argv)
+{
+    GOptionContext * context = g_option_context_new ("analyze <INDEX>");
+    g_option_context_set_help_enabled(context, TRUE);
+    g_option_context_add_main_entries(context, analyzer_entries, NULL);
+    g_option_context_set_description(context,
+                                     "\n" \
+                                     "Copyright (C) 2019 by Manuel Bessler\n" \
+                                     "License: GPLv2\n"
+        );
+    GError *error = NULL;
+    if (!g_option_context_parse (context, &argc, &argv, &error)) {
+        g_printerr ("%s\n", error->message);
+        g_error_free(error);
+        usage(context);
+        return(1);
+    }
+    g_option_context_free (context);
+
+    if (analyzer_rest == NULL || analyzer_rest[0] == NULL)
+    {
+        g_printerr("%s: missing argument: INDEX\n", g_get_prgname());
+        exit(1);
+    }
+    if (analyzer_rest[1] != NULL)
+    {
+        g_printerr("%s: too many arguments\n", g_get_prgname());
+        exit(1);
+    }
+
+    analyzer_index_file = g_strdup (analyzer_rest[0]);
+
+    return(analyzer_main());
+}
+
+
+
 static int index_args(int argc, char ** argv) {
     GOptionContext * context = g_option_context_new ("index <IMAGE> <OUTDIR>");
     g_option_context_set_help_enabled(context, TRUE);
@@ -1286,6 +1417,7 @@ static void main_usage(const char * argv0)
     g_printerr ("    index\t\tIndex and Chunk an Image File\n");
     g_printerr ("    patch\t\tCreate/Update an Image File from chunks,\n");
     g_printerr ("         \t\t optionally referencing one or more similar local images\n");
+    g_printerr ("    analyze\t\tAnalyze/Dump a .chidx Chunk Index File\n");
     exit(1);
 }
 
@@ -1301,8 +1433,8 @@ int main(int argc, char ** argv) {
         action = index_args;
     } else if (g_str_equal (argv[1], "patch")) {
         action = patch_args;
-    //} else if (g_str_equal (argv[1], "analyze")) {
-        //action = secret_tool_action_analyze;
+    } else if (g_str_equal (argv[1], "analyze")) {
+        action = analyze_args;
     } else if (g_str_equal(argv[1], "version") || g_str_equal(argv[1], "--version")) {
         action = version_main;
     } else {
