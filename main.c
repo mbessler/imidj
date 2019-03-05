@@ -130,6 +130,11 @@ static gboolean analyzer_dump_chunksums = FALSE;
 static gboolean analyzer_dump_not_header = FALSE;
 static gchar** analyzer_rest = NULL;
 
+static gchar* differ_image1 = NULL;
+static gchar* differ_image2 = NULL;
+static gchar** differ_rest = NULL;
+
+
 static gboolean opt_verbose = FALSE;
 static gboolean opt_version = FALSE;
 CURL * ceh = NULL;
@@ -179,6 +184,16 @@ GOptionEntry analyzer_entries[] = {
     {"version", 'V', 0, G_OPTION_ARG_NONE, &opt_version, "Show version information", NULL },
     /* remaining args */
     {G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &analyzer_rest, NULL, NULL},
+    {0}
+};
+
+GOptionEntry differ_entries[] = {
+    /* imidj diff <IMAGE1> <IMAGE2> */
+    {"verbose", 'v', 0, G_OPTION_ARG_NONE, &opt_verbose, "Increase output verbosity", NULL },
+    /* general */
+    {"version", 'V', 0, G_OPTION_ARG_NONE, &opt_version, "Show version information", NULL },
+    /* remaining args */
+    {G_OPTION_REMAINING, 0, 0, G_OPTION_ARG_FILENAME_ARRAY, &differ_rest, NULL, NULL},
     {0}
 };
 
@@ -839,6 +854,130 @@ static int indexer_main(void)
     return 0;
 }
 
+static int differ_main(void)
+{
+    char * image_path[2];
+    uint8_t * wholefile_digest[2];
+    GPtrArray * chunk_records[2];
+    GHashTable * chunk_refcnt_table[2];
+    gchar * image_dir[2];
+    gchar * image_fname[2];
+
+    image_path[0] = realpath(differ_image1, NULL);
+    image_path[1] = realpath(differ_image2, NULL);
+
+    for(int idx=0; idx < 2; idx++) {
+        if (image_path[idx] == NULL) g_printerr("image_path is NULL: %s\n", g_strerror(errno));
+        // todo error handling
+
+        image_dir[idx] = g_path_get_dirname(image_path[idx]);
+        image_fname[idx] = g_path_get_basename(image_path[idx]);
+
+        if (! g_file_test(image_path[idx], (G_FILE_TEST_EXISTS | G_FILE_TEST_IS_REGULAR))) {
+            g_printerr("image file not found: '%s'\n", image_path[idx]);
+            exit(30);
+        }
+
+        /* open image */
+        int fd = g_open(image_path[idx], O_RDONLY);
+        if (fd < 0) {
+            g_printerr("Cannot open image file '%s': %s\n", image_path[idx], g_strerror(errno));
+            exit(32);
+        }
+
+        /* checksum of whole file */
+        wholefile_digest[idx] = whole_file_checksum(image_path[idx]);
+
+        g_print("indexing...\n");
+        chunk_records[idx] = g_ptr_array_new();
+        chunk_refcnt_table[idx] = g_hash_table_new(g_bytes_hash, g_bytes_equal);
+        index_a_file(image_path[idx], chunk_records[idx], chunk_refcnt_table[idx]);
+        g_print("chunk_records = %p\n", (void *)chunk_records[idx]);
+        g_close(fd, NULL);
+    }
+
+    /* simple diff algorithm as we just want to check if the position, size, and chunksum is the same for each chunk for both files */
+    if (chunk_records[0]->len = chunk_records[1]->len) {
+        g_print("Both files have %d chunks.\n", chunk_records[0]->len);
+    } else {
+        g_print("File A has %d chunks, but file B has %d chunks\n", chunk_records[0]->len, chunk_records[1]->len);
+    }
+
+    //unsigned int min_c = (chunk_records[0]->len < chunk_records[1]->len) ? chunk_records[0]->len : chunk_records[1]->len;
+    unsigned int max_c = (chunk_records[0]->len > chunk_records[1]->len) ? chunk_records[0]->len : chunk_records[1]->len;
+
+    for (unsigned int i = 0; i < max_c; i++)
+    {
+        chidx_chunk_record_t * record[2] = { NULL, NULL };
+        gchar * hexdigest[2] = {NULL, NULL};
+
+        for (int idx=0; idx<2; idx++) {
+            if (i < chunk_records[idx]->len) {
+                record[idx] = g_ptr_array_index(chunk_records[idx], i);
+                // num should be same as i
+                if (record[idx]->num != i) {
+                    g_print("Numbering issue in file %c at %d\n", (idx==0)?'A':'B', i);
+                }
+            } else {
+                record[idx] = NULL;
+            }
+        }
+
+        g_print("Chunk %d |", i);
+
+        if (i < chunk_records[0]->len && i < chunk_records[1]->len) { // chunks in both
+            hexdigest[0] = hexlify_md5(record[0]->chunk_record.chunkhash);
+            hexdigest[1] = hexlify_md5(record[1]->chunk_record.chunkhash);
+            if (record[0]->offset != record[1]->offset) {
+                g_print(" offsets differ: %"PRIu64" vs %"PRIu64" |", record[0]->offset, record[1]->offset);
+            } else {
+                g_print(" offsets identical %"PRIu64" |", record[0]->offset);
+            }
+            if (record[0]->chunk_record.l != record[1]->chunk_record.l) {
+                g_print(" lengths differ: %d vs %d |", record[0]->chunk_record.l, record[1]->chunk_record.l);
+            } else {
+                g_print(" lengths identical %d |", record[0]->chunk_record.l);
+            }
+            if (memcmp(record[0]->chunk_record.chunkhash, record[1]->chunk_record.chunkhash, MD5_DIGEST_LENGTH) != 0) {
+                g_print("  chunksums differ: %s vs %s |", hexdigest[0], hexdigest[1]);
+            } else {
+                g_print(" chunksums identical %s |", hexdigest[0]);
+            }
+
+        } else if (i < chunk_records[0]->len) { // chunk exists only in A
+            hexdigest[0] = hexlify_md5(record[0]->chunk_record.chunkhash);
+            g_print("Only in A: offset=%"PRIu64"  len=%d  chunksum=%s\n", record[0]->offset, record[0]->chunk_record.l, hexdigest[0]);
+        } else { // chunk exists only in B
+            hexdigest[1] = hexlify_md5(record[1]->chunk_record.chunkhash);
+            g_print("Only in B: offset=%"PRIu64"  len=%d  chunksum=%s\n", record[1]->offset, record[1]->chunk_record.l, hexdigest[1]);
+        }
+
+        if( hexdigest[0] != NULL) free(hexdigest[0]);
+        if( hexdigest[1] != NULL) free(hexdigest[1]);
+        g_print("\n");
+    }
+
+
+    g_ptr_array_free(chunk_records[0], TRUE); // TODO do other cleanup/free stuff required by GPtrArray
+    g_hash_table_destroy(chunk_refcnt_table[0]); // TODO do other cleanup as needed for hash tables
+    g_ptr_array_free(chunk_records[1], TRUE); // TODO do other cleanup/free stuff required by GPtrArray
+    g_hash_table_destroy(chunk_refcnt_table[1]); // TODO do other cleanup as needed for hash tables
+
+    g_free(differ_image1);
+    g_free(differ_image2);
+    free(image_path[0]);
+    free(image_path[1]);
+    free(wholefile_digest[0]);
+    free(wholefile_digest[1]);
+    g_free(image_dir[0]);
+    g_free(image_fname[0]);
+    g_free(image_dir[1]);
+    g_free(image_fname[1]);
+
+    return 0;
+}
+
+
 static char * abspath_mkdir(gchar * relpath) {
     /* if file exists, use realpath() */
     if (g_file_test(relpath, G_FILE_TEST_EXISTS)) {
@@ -1433,6 +1572,47 @@ static int index_args(int argc, char ** argv) {
     return(indexer_main());
 }
 
+static int diff_args(int argc, char ** argv) {
+    GOptionContext * context = g_option_context_new ("diff <IMAGE1> <IMAGE2>");
+    g_option_context_set_help_enabled(context, TRUE);
+    g_option_context_add_main_entries(context, differ_entries, NULL);
+    g_option_context_set_description(context,
+                                     "\n" \
+                                     "Copyright (C) 2019 by Manuel Bessler\n" \
+                                     "License: GPLv2\n"
+        );
+    GError *error = NULL;
+    if (!g_option_context_parse (context, &argc, &argv, &error)) {
+        g_printerr ("%s\n", error->message);
+        g_error_free(error);
+        usage(context);
+        return(1);
+    }
+
+    g_option_context_free (context);
+
+    if (differ_rest == NULL || differ_rest[0] == NULL)
+    {
+        g_printerr("%s: missing argument: IMAGE1\n", g_get_prgname());
+        return(1);
+    }
+    if (differ_rest[1] == NULL || differ_rest[2] != NULL)
+    {
+        g_printerr("%s: missing argument: IMAGE2\n", g_get_prgname());
+        return(1);
+    }
+    if (differ_rest[2] != NULL)
+    {
+        g_printerr("%s: too many arguments\n", g_get_prgname());
+        return(1);
+    }
+
+    differ_image1 = g_strdup (differ_rest[0]);
+    differ_image2 = g_strdup (differ_rest[1]);
+    return(differ_main());
+}
+
+
 static void main_usage(const char * argv0)
 {
     g_printerr("imidj - IMage Incremental Deltafragment Joiner\n" \
@@ -1447,6 +1627,7 @@ static void main_usage(const char * argv0)
     g_printerr ("    patch\t\tCreate/Update an Image File from chunks,\n");
     g_printerr ("         \t\t optionally referencing one or more similar local images\n");
     g_printerr ("    analyze\t\tAnalyze/Dump a .chidx Chunk Index File\n");
+    g_printerr ("    diff\t\tDiff two images per chunk\n");
     exit(1);
 }
 
@@ -1464,6 +1645,8 @@ int main(int argc, char ** argv) {
         action = patch_args;
     } else if (g_str_equal (argv[1], "analyze")) {
         action = analyze_args;
+    } else if (g_str_equal (argv[1], "diff")) {
+        action = diff_args;
     } else if (g_str_equal(argv[1], "version") || g_str_equal(argv[1], "--version")) {
         action = version_main;
     } else {
