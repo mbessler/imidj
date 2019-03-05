@@ -1201,7 +1201,9 @@ static int patcher_main(int num_reference_images)
         reference_image_fds[i] = g_open(patcher_reference_image_array[i], O_RDONLY);
         if (reference_image_fds[i] < 0) {
             g_printerr("Cannot open reference image file '%s': %s\n", patcher_reference_image_array[i], g_strerror(errno));
-            exit(65);
+            //exit(65);
+            reference_image_fds[i] = -1;
+            continue;
         }
     }
 
@@ -1280,7 +1282,7 @@ static int patcher_main(int num_reference_images)
         /* next, check if the chunk exists in a local reference image */
         for(int r=0; r<num_reference_images; r++) {
             /* skip reference image if its fd is -1 */
-            if (reference_image_fds[i] < 0) {
+            if (reference_image_fds[r] < 0) {
                 continue;
             }
             /* future optimization: use a hash to look up the index instead of iterating over list  */
