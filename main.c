@@ -364,6 +364,7 @@ static int write_chunkindex_header(int fd, uint8_t * filehash) {
 
 #ifdef LZMA
 static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
+    size_t decompressed_size = 0;
     lzma_stream lz_strm = LZMA_STREAM_INIT;
     lzma_ret lz_ret = lzma_stream_decoder(&lz_strm, UINT64_MAX, LZMA_TELL_ANY_CHECK | LZMA_TELL_NO_CHECK);
     if (lz_ret != LZMA_OK) {
@@ -427,6 +428,8 @@ static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
                 exit(57);
             }
 
+            decompressed_size += num_written;
+
             lz_strm.next_out = outbuf;
             lz_strm.avail_out = sizeof(outbuf);
         }
@@ -461,6 +464,8 @@ static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
         }
     }
     lzma_end(&lz_strm);
+    if (0) g_printerr("wrote decompressed %zd\n", decompressed_size);
+
     return TRUE;
 }
 
@@ -1253,7 +1258,11 @@ static int patcher_main(int num_reference_images)
         /* first check if chunk is already in place, if: target_image_exists && ! patcher_force_overwrite   and make sure we're not running over the end of asis list */
         if (target_image_exists && ! patcher_force_overwrite && target_asis_chunk_list->len > i) {
             chidx_chunk_record_t * target_asis_record = g_ptr_array_index(target_asis_chunk_list, i);
-            if (memcmp(target_record->chunk_record.chunkhash, target_asis_record->chunk_record.chunkhash, MD5_DIGEST_LENGTH) == 0) {
+            // not only compare the chunks here, but also the offset since things might have shifted.
+            // In that case, just depend on other sources for this block instead of trying to copy since
+            // it was most likely already overwritten by a previous chunk.
+            if (target_record->offset == target_asis_record->offset &&
+                memcmp(target_record->chunk_record.chunkhash, target_asis_record->chunk_record.chunkhash, MD5_DIGEST_LENGTH) == 0) {
                 g_print("chunk %d already correct in target image\n", i);
                 patch_stats.bytes_already_present += target_record->chunk_record.l;
                 patch_stats.chunks_already_present += 1;
@@ -1263,9 +1272,10 @@ static int patcher_main(int num_reference_images)
 
         /* seek in the target image */
         if (lseek(tfd, target_record->offset, SEEK_SET) < 0) {
-          g_printerr("Cannot seek target image file '%s': %s\n", target_image_path, g_strerror(errno));
+            g_printerr("Cannot seek target image file '%s': %s\n", target_image_path, g_strerror(errno));
             exit(69);
         }
+
         gboolean chunk_found_in_ref = FALSE;
         /* next, check if the chunk exists in a local reference image */
         for(int r=0; r<num_reference_images; r++) {
@@ -1377,7 +1387,7 @@ static int patcher_main(int num_reference_images)
             g_printerr("verify failed, checksum mismatch: expected %s, found %s\n", hexlify_md5(target_index_hdr.fullfilehash), hexlify_md5(wholefile_digest));
             exit(73);
         } else {
-            g_print("verify ok, image checksum is %s", hexlify_md5(wholefile_digest));
+            g_print("verify ok, image checksum is %s\n", hexlify_md5(wholefile_digest));
         }
         free(wholefile_digest);
     }
