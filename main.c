@@ -116,6 +116,8 @@ static gchar * indexer_outdir = NULL;
 static gchar* patcher_index_file = NULL;
 static gchar* patcher_out_img = NULL;
 static gchar* patcher_url = NULL;
+static gint patcher_dl_retry_count_chunk = 3;
+static gint patcher_dl_timeout_sleep_ms = 100;
 static gboolean patcher_force_overwrite = FALSE;
 static gboolean patcher_skip_mismatched_refs = FALSE;
 static gboolean patcher_skip_verify = FALSE;
@@ -165,6 +167,8 @@ GOptionEntry patcher_entries[] = {
     {"reference-image", 'R', 0, G_OPTION_ARG_FILENAME_ARRAY, &patcher_reference_image_array, "Existing image file as reference (requires matching '-r'; can be specified zero or more times) ", "IMAGEFILE"},
     {"skip-mismatched-references", '\0', 0, G_OPTION_ARG_NONE, &patcher_skip_mismatched_refs, "Skip if a reference image mismatches its chunk index (instead of exit w/ error)", NULL},
     {"skip-verify", '\0',  0, G_OPTION_ARG_NONE, &patcher_skip_verify, "Skip image checksum verification checksum after (re)building from chunks", NULL},
+    {"dl-num-retries", '\0',  0, G_OPTION_ARG_INT, &patcher_dl_retry_count_chunk, "Number of retries for failed chunk downloads (default: 3)", "N"},
+    {"dl-sleep-before-retry", '\0',  0, G_OPTION_ARG_INT, &patcher_dl_timeout_sleep_ms, "Number of milliseconds to sleep before retrying chunk download after a timeout (default: 100)", "MS"},
     {"verbose", 'v', 0, G_OPTION_ARG_NONE, &opt_verbose, "Increase output verbosity", NULL },
     /* general */
     {"version", 'V', 0, G_OPTION_ARG_NONE, &opt_version, "Show version information", NULL },
@@ -1130,6 +1134,7 @@ static int analyzer_main(void)
 
 static int patcher_main(int num_reference_images)
 {
+    char cerrbuf[CURL_ERROR_SIZE];
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
         g_printerr("libcurl init failed\n");
         exit(80);
@@ -1141,6 +1146,7 @@ static int patcher_main(int num_reference_images)
         exit(81);
     }
     curl_easy_setopt(ceh, CURLOPT_WRITEFUNCTION, receive_data_from_curl);
+    curl_easy_setopt(ceh, CURLOPT_ERRORBUFFER, cerrbuf);
 
     g_print("patching image '%s' (index: '%s')\n", patcher_out_img, patcher_index_file);
 
@@ -1360,11 +1366,47 @@ static int patcher_main(int num_reference_images)
                 exit(71);
             }
 
-            res = curl_easy_perform(ceh);
+            gint retries;
+            for(retries=0; retries < patcher_dl_retry_count_chunk; retries++) {
+                cerrbuf[0] = 0;
+                res = curl_easy_perform(ceh);
+                if (res == CURLE_OK) {
+                    break;
+                }
+                // retry immediately on some curl errors, sleep for a while and retry on timeout errors, and fail immediatly on all others
+                if (res == CURLE_FTP_ACCEPT_TIMEOUT || res == CURLE_OPERATION_TIMEDOUT) {
+                    g_print("curl operation timeout, sleeping for %d ms before retry\n", patcher_dl_timeout_sleep_ms);
+                    g_usleep(1000 * patcher_dl_timeout_sleep_ms);
+                    continue;
+                }
+                if (res == CURLE_COULDNT_RESOLVE_PROXY
+                    || res == CURLE_COULDNT_RESOLVE_HOST
+                    || res == CURLE_COULDNT_CONNECT
+                    || res == CURLE_FTP_ACCEPT_FAILED
+                    || res == CURLE_FTP_CANT_GET_HOST
+                    || res == CURLE_PARTIAL_FILE
+                    || res == CURLE_FTP_COULDNT_RETR_FILE
+                    || res == CURLE_HTTP_RETURNED_ERROR
+                    || res == CURLE_SSL_CONNECT_ERROR
+                    || res == CURLE_GOT_NOTHING
+                    || res == CURLE_SEND_ERROR
+                    || res == CURLE_RECV_ERROR
+                    || res == CURLE_SSH
+                    ) {
+                    continue;
+                }
+                break; // all other errors
+            }
             if (res != CURLE_OK) {
-                g_printerr("could not fetch remote chunk block ret=%d\n", res);
+                size_t len = strlen(cerrbuf);
+                if(len) {
+                    g_printerr("Could not fetch remote chunk block after %d tries ret=%d. %s\n", retries, res, cerrbuf);
+                } else {
+                    g_printerr("Could not fetch remote chunk block after %d tries ret=%d. %s\n", retries, res, curl_easy_strerror(res));
+                }
                 exit(72);
             }
+
             lseek(tempfd, 0, SEEK_SET);
             decompress(tempfd, tfd, &chunk_compressed_size);
             patch_stats.bytes_fetched += target_record->chunk_record.l;
