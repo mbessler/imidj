@@ -1,10 +1,19 @@
-WITH_LZMA ?= 1
+WITH_LZMA ?= 0
+WITH_LZIP ?= 1
 STRICT_COMPILE ?= 1
 
 ifeq ($(WITH_LZMA),1)
 LZMA_LIBS=$$(pkg-config --libs liblzma)
+LZMA_LDFLAGS=
 LZMA_CFLAGS=-DLZMA=1
 endif
+
+ifeq ($(WITH_LZIP),1)
+LZIP_LIBS=-llz
+LZIP_LDFLAGS=
+LZIP_CFLAGS=-DLZIP=1
+endif
+
 
 CFLAGS ?= -g
 CFLAGS += -O3 -Wall -std=gnu99
@@ -36,13 +45,13 @@ endif # STRICT_COMPILE=1
 all: imidj
 
 imidj: imidj.o chunker.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $$(pkg-config --libs glib-2.0) $$(pkg-config libcrypto --libs) $(LZMA_LIBS) $$(pkg-config --libs libcurl)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LZIP_LDFLAGS) $$(pkg-config --libs glib-2.0) $$(pkg-config libcrypto --libs) $(LZMA_LIBS) $(LZIP_LIBS) $$(pkg-config --libs libcurl)
 
 chunker.o: chunker.c
 	$(CC) $(CFLAGS) -c $< -o $@ 
 
 imidj.o: main.c
-	$(CC) $(CFLAGS) $(LZMA_CFLAGS) $$(pkg-config --cflags glib-2.0) $$(pkg-config --cflags libcurl) -c $< -o $@
+	$(CC) $(CFLAGS) $(LZMA_CFLAGS) $(LZIP_CFLAGS) $$(pkg-config --cflags glib-2.0) $$(pkg-config --cflags libcurl) -c $< -o $@
 
 clean:
 	rm -f *.o imidj

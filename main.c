@@ -44,6 +44,10 @@
 #include <lzma.h>
 #endif /* LZMA */
 
+#ifdef LZIP
+#include <lzlib.h>
+#endif /* lzip */
+
 #include "chunker.h"
 
 #define VERSION "0.0.0"
@@ -54,6 +58,15 @@
 #define WINSIZE (0xfff)
 #define CHUNKMASK (0xffff)
 #define MINCHUNKSIZE (1024)
+
+
+#ifdef LZIP
+#define CHUNK_EXT ".lz"
+#elif LZMA
+#define CHUNK_EXT ".xz"
+#else
+#define CHUNK_EXT ""
+#endif /* LZIP/LZMA */
 
 
 typedef enum {
@@ -366,8 +379,162 @@ static int write_chunkindex_header(int fd, uint8_t * filehash) {
     return 0;
 }
 
-#ifdef LZMA
-static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
+
+#ifdef LZIP
+static gboolean lzip_decompress(int infd, int outfd, int * ret_compressed_size) {
+    size_t decompressed_size = 0;
+    enum { buffer_size = 1024*128 };
+    uint8_t inbuf[buffer_size];
+    uint8_t outbuf[buffer_size];
+    struct LZ_Decoder * const decoder = LZ_decompress_open();
+    if( !decoder || LZ_decompress_errno( decoder ) != LZ_ok ) {
+        LZ_decompress_close( decoder );
+        exit(55);
+    }
+
+    if (ret_compressed_size) {
+        (*ret_compressed_size) = 0;
+    }
+
+    gboolean ineof = FALSE;
+    do {
+        const int max_in_size = MIN(LZ_decompress_write_size(decoder), buffer_size);
+        ssize_t num_read_compr = 0;
+        if( max_in_size > 0 ) {
+            num_read_compr = read(infd, inbuf, max_in_size);
+            if (num_read_compr == 0) {
+                ineof = TRUE;
+            } else if (num_read_compr < 0) {
+                g_printerr("error reading from chblo file: %s\n", g_strerror(errno));
+                exit(56);
+            }
+            if( num_read_compr != LZ_decompress_write(decoder, inbuf, num_read_compr) ) {
+                g_printerr("lzip decompression write failure\n");
+                exit(56);
+            }
+            if (ret_compressed_size) {
+                (*ret_compressed_size) += num_read_compr;
+            }
+
+            if( num_read_compr < max_in_size || ineof ) {
+                LZ_decompress_finish(decoder);
+            }
+        }
+
+        while(1) {
+            const int decompr_size = LZ_decompress_read(decoder, outbuf, buffer_size);
+            if( decompr_size > 0 ) {
+                ssize_t num_written = write(outfd, outbuf, decompr_size);
+                if (num_written < 0) {
+                    g_printerr("error writing decompressed chunk block to image: %s\n", g_strerror(errno));
+                    exit(57);
+                } else if (num_written != decompr_size) {
+                    g_printerr("error short write while writing decompressed chunk block to image, expected: %d, wrote: %zd\n", decompr_size, num_written);
+                    exit(57);
+                }
+                decompressed_size += num_written;
+            }
+            else if( decompr_size <= 0 ) {
+                break;
+            }
+        }
+    } while(LZ_decompress_member_finished(decoder) != 1 && LZ_decompress_finished(decoder) != 1);
+    LZ_decompress_close(decoder);
+    if (0) g_printerr("wrote decompressed %zd\n", decompressed_size);
+
+    return TRUE;
+}
+
+static size_t lzip_compress(int outfd, uint8_t * data, int len) {
+    const unsigned long long member_size = 0x7FFFFFFFFFFFFFFFULL; /* INT64_MAX */
+    enum { buffer_size = 65536 };
+    uint8_t buffer[buffer_size];
+    struct Lzma_options {
+        int dictionary_size;                /* 4 KiB .. 512 MiB */
+        int match_len_limit;                /* 5 .. 273 */
+    };
+    const struct Lzma_options option_mapping[] =
+        {
+            {   65535,  16 },           /* -0 (65535,16 chooses fast encoder) */
+            { 1 << 20,   5 },           /* -1 */
+            { 3 << 19,   6 },           /* -2 */
+            { 1 << 21,   8 },           /* -3 */
+            { 3 << 20,  12 },           /* -4 */
+            { 1 << 22,  20 },           /* -5 */
+            { 1 << 23,  36 },           /* -6 */
+            { 1 << 24,  68 },           /* -7 */
+            { 3 << 23, 132 },           /* -8 */
+            { 1 << 25, 273 } };         /* -9 */
+    struct Lzma_options encoder_options = option_mapping[6]; /* default = "-6" */
+    if( encoder_options.dictionary_size > len ) {
+        encoder_options.dictionary_size = len;
+    }
+    if( encoder_options.dictionary_size < LZ_min_dictionary_size() ) {
+        encoder_options.dictionary_size = LZ_min_dictionary_size();
+    }
+    struct LZ_Encoder * const encoder =
+        LZ_compress_open( encoder_options.dictionary_size,
+                          encoder_options.match_len_limit,
+                          member_size );
+
+    if( !encoder || LZ_compress_errno( encoder ) != LZ_ok ) {
+        if( !encoder || LZ_compress_errno( encoder ) == LZ_mem_error ) {
+            g_printerr("Not enough memory. Try a smaller dictionary size.\n");
+        } else {
+            g_printerr("invalid argument to encoder.\n");
+        }
+        exit(50);
+    }
+    size_t total_written = 0;
+    int comp_written = 0;
+
+    do {
+        while( LZ_compress_write_size(encoder) > 0 ) {
+            const int size = MIN(LZ_compress_write_size(encoder), len-comp_written);
+            int wr;
+            if ((wr = LZ_compress_write(encoder, data+comp_written, size)) < 0) {
+                if (LZ_compress_errno(encoder) != LZ_ok ) {
+                    g_printerr("lzip compression write failure.\n");
+                    exit(51);
+                }
+            }
+            comp_written += wr;
+            if(comp_written >= len) {
+                LZ_compress_finish(encoder);
+            }
+        }
+        int comp_read;
+        if ((comp_read = LZ_compress_read(encoder, buffer, buffer_size)) <= 0) {
+            if (LZ_compress_errno(encoder) != LZ_ok ) {
+                g_printerr("lzip compression read failure.\n");
+                exit(51);
+            }
+        }
+        if (write(outfd, buffer, comp_read) != comp_read) {
+            g_printerr("error writing out compressed chunk: %s\n", g_strerror(errno));
+            exit(52);
+        }
+        total_written += comp_read;
+    } while(LZ_compress_finished(encoder) != 1);
+
+    // save some compression stats
+    const unsigned long long in_size = LZ_compress_total_in_size(encoder);
+    const unsigned long long out_size = LZ_compress_total_out_size(encoder);
+    if( in_size == 0 || out_size == 0 ) {
+        g_printerr("no data compressed.\n");
+    } else {
+        g_printerr("%6.3f:1, %5.2f%% ratio, %5.2f%% saved, %llu in, %llu out.\n",
+                   (double)in_size / out_size,
+                   ( 100.0 * out_size ) / in_size,
+                   100.0 - ( ( 100.0 * out_size ) / in_size ),
+                   in_size, out_size );
+    }
+    LZ_compress_close(encoder);
+    return total_written;
+}
+
+#elif LZMA
+static gboolean lzma_decompress(int infd, int outfd, int * ret_compressed_size) {
     size_t decompressed_size = 0;
     lzma_stream lz_strm = LZMA_STREAM_INIT;
     lzma_ret lz_ret = lzma_stream_decoder(&lz_strm, UINT64_MAX, LZMA_TELL_ANY_CHECK | LZMA_TELL_NO_CHECK);
@@ -396,7 +563,7 @@ static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
     lz_strm.avail_out = sizeof(outbuf);
     gboolean ineof = FALSE;
     if (ret_compressed_size) {
-        *ret_compressed_size = 0;
+        (*ret_compressed_size) = 0;
     }
 
     while (1) {
@@ -411,7 +578,7 @@ static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
             }
             lz_strm.avail_in = num_read;
             if (ret_compressed_size) {
-                *ret_compressed_size += num_read;
+                (*ret_compressed_size) += num_read;
             }
 
             // if input EOF, set LZMA_FINISH
@@ -450,7 +617,7 @@ static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
                 g_printerr("Specified preset is not supported\n");
                 break;
             case LZMA_FORMAT_ERROR:
-                g_printerr("The input is not in the .xz format\n");
+                g_printerr("The input is not in the " CHUNK_EXT " format\n");
                 break;
             case LZMA_DATA_ERROR:
                 g_printerr("Compressed file is corrupt\n");
@@ -474,7 +641,7 @@ static gboolean decompress(int infd, int outfd, int * ret_compressed_size) {
 }
 
 
-static size_t compress(int outfd, uint8_t * data, int len) {
+static size_t lzma_compress(int outfd, uint8_t * data, int len) {
     uint32_t lz_preset = 6; // 6 since any higher than 6 requires a lot more memory during decompress on the target
     lzma_stream lz_strm = LZMA_STREAM_INIT;
     lzma_ret lz_ret;
@@ -540,6 +707,7 @@ static size_t compress(int outfd, uint8_t * data, int len) {
     return total_written;
 }
 #endif /* LZMA */
+
 
 static uint8_t * whole_file_checksum(char * filename) {
     /* checksum whole file */
@@ -691,11 +859,7 @@ static int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_
         char * chblo_dir = g_strdup_printf("%s/chunks/%02x", outputdir, record->chunk_record.chunkhash[0]);
         char * chblo_path = NULL;
         gchar * hexdigest = hexlify_md5(record->chunk_record.chunkhash);
-#ifdef LZMA
-        chblo_path = g_strdup_printf("%s/%s.chblo.xz", chblo_dir, hexdigest);
-#else
-        chblo_path = g_strdup_printf("%s/%s.chblo", chblo_dir, hexdigest);
-#endif /* LZMA */
+        chblo_path = g_strdup_printf("%s/%s.chblo" CHUNK_EXT, chblo_dir, hexdigest);
         g_free(hexdigest);
 
         if (g_mkdir_with_parents(chblo_dir, 0755) < 0) {
@@ -713,8 +877,11 @@ static int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_
             }
 
             size_t total_written = 0;
-#ifdef LZMA
-            total_written = compress(chblofd, chunk_data, record->chunk_record.l);
+#ifdef LZIP
+            total_written = lzip_compress(chblofd, chunk_data, record->chunk_record.l);
+            g_print("chunk of size %d compressed to %zd\n", record->chunk_record.l, total_written);
+#elif LZMA
+            total_written = lzma_compress(chblofd, chunk_data, record->chunk_record.l);
             g_print("chunk of size %d compressed to %zd\n", record->chunk_record.l, total_written);
 #else
             for(int left_to_write=record->chunk_record.l; left_to_write > 0; ) {
@@ -727,7 +894,7 @@ static int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_
                 total_written += written;
                 left_to_write -= written;
             }
-#endif /* LZMA */
+#endif /* LZIP/LZMA */
             g_print("wrote %zd bytes, expected %d\n", total_written, record->chunk_record.l);
             g_close(chblofd, NULL);
         }
@@ -1337,24 +1504,29 @@ static int patcher_main(int num_reference_images)
 
         /* otherwise download the chunk from the remote chunk store */
         gchar * hexdigest = hexlify_md5(target_record->chunk_record.chunkhash);
-        int chunk_compressed_size;
+        int chunk_compressed_size = 0;
         if(url_is_local) {
             int chblo_fd = -1;
-            gchar * chblo_path = g_strdup_printf("%s/chunks/%02x/%s.chblo.xz", patcher_url, target_record->chunk_record.chunkhash[0], hexdigest);
+            gchar * chblo_path = g_strdup_printf("%s/chunks/%02x/%s.chblo" CHUNK_EXT, patcher_url, target_record->chunk_record.chunkhash[0], hexdigest);
             g_print("retrieving chunk #%d with checksum %s from local file '%s'\n", i, hexdigest, chblo_path);
             if ((chblo_fd = open(chblo_path, O_RDONLY)) < 0) {
                 g_printerr("could not open chblo '%s': %s\n", chblo_path, g_strerror(errno));
                 exit(70);
             }
 
-            decompress(chblo_fd, tfd, &chunk_compressed_size);
+#ifdef LZIP
+            lzip_decompress(chblo_fd, tfd, &chunk_compressed_size);
+#elif LZMA
+            lzma_decompress(chblo_fd, tfd, &chunk_compressed_size);
+#endif /* LZIP/LZMA */
             patch_stats.bytes_fetched += target_record->chunk_record.l;
             patch_stats.bytes_fetched_actual += chunk_compressed_size;
+            close(chblo_fd);
             g_free(chblo_path);
             //continue;
         } else { /* remote url */
             gchar tmpfilename[] = "/tmp/.chblo.XXXXXX";
-            gchar * chblo_url = g_strdup_printf("%s/chunks/%02x/%s.chblo.xz", patcher_url, target_record->chunk_record.chunkhash[0], hexdigest);
+            gchar * chblo_url = g_strdup_printf("%s/chunks/%02x/%s.chblo" CHUNK_EXT, patcher_url, target_record->chunk_record.chunkhash[0], hexdigest);
             int tempfd = g_mkstemp(tmpfilename);
             unlink(tmpfilename);
             curl_easy_setopt(ceh, CURLOPT_WRITEDATA, &tempfd);
@@ -1408,7 +1580,12 @@ static int patcher_main(int num_reference_images)
             }
 
             lseek(tempfd, 0, SEEK_SET);
-            decompress(tempfd, tfd, &chunk_compressed_size);
+#ifdef LZIP
+            lzip_decompress(tempfd, tfd, &chunk_compressed_size);
+#elif LZMA
+            lzma_decompress(tempfd, tfd, &chunk_compressed_size);
+#endif /* LZIP/LZMA */
+
             patch_stats.bytes_fetched += target_record->chunk_record.l;
             patch_stats.bytes_fetched_actual += chunk_compressed_size;
             close(tempfd);
