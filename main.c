@@ -788,14 +788,14 @@ static int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * 
             g_snprintf(hexdigit, 3, "%02x", digest[_i]);
             g_strlcat(hexdigest, hexdigit, MD5_DIGEST_LENGTH*2+1);
         }
-        g_print("%s\n", hexdigest);
 
         if (chunk_refcnt_table != NULL) {
             GBytes * gb_key = g_bytes_new(digest, MD5_DIGEST_LENGTH);
             if (g_hash_table_contains(chunk_refcnt_table, gb_key)) {
                 /* increment by 1 */
                 long * val = (long *)(g_hash_table_lookup(chunk_refcnt_table, gb_key));
-                *val += 1;
+                (*val) += 1;
+                //g_print("%02ld   ", *val);
                 //g_hash_table_replace(chunk_refcnt_table, gb_key,
                 //                     (void *)(
                 //                         (long)(g_hash_table_lookup(chunk_refcnt_table, gb_key)) + 1
@@ -803,9 +803,11 @@ static int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * 
             } else {
                 long * val = malloc(sizeof(long));
                 *val = 1;
+                //g_print("%02ld ", *val);
                 g_hash_table_insert(chunk_refcnt_table, gb_key, val);
             }
         }
+        g_print("%s\n", hexdigest);
 
         record->num = i;
         record->offset = offset;
@@ -996,14 +998,13 @@ static int indexer_main(void)
     int total_chunks = 0;
     int unique_chunks = 0;
     GHashTableIter iter;
-    long tmpcount;
+    gpointer value;
     g_hash_table_iter_init(&iter, chunk_refcnt_table);
-    while (g_hash_table_iter_next(&iter, NULL,  (gpointer)&tmpcount)) {
-        // TODO fix: tmpcount isn't working right, either at set or retrieve here
-        total_chunks += tmpcount;
+    while (g_hash_table_iter_next(&iter, NULL,  &value)) {
+        long * val = (long *)value;
+        total_chunks += (*val);
         unique_chunks += 1;
         g_print("total chunks now: %d   unique now %d\n", total_chunks, unique_chunks);
-
     }
     g_print("chunks total: %d  unique: %d\n", total_chunks, unique_chunks);
 
