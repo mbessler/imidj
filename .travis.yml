@@ -1,0 +1,18 @@
+language: c
+os: linux
+dist: bionic
+arch: amd64
+compiler: gcc
+#before_install:
+#  - sudo apt-get -q update
+#  - sudo apt-get -y install libglib2.0-dev libglib2.0-dev-bin liblzma-dev liblz-dev
+#install: make
+addons:
+  apt:
+    packages:
+    - libglib2.0-dev
+    - libglib2.0-dev-bin
+    - liblzma-dev
+    - liblz-dev
+    - make
+script: make WITH_LZMA=0 WITH_LZIP=1
