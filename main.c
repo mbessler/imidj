@@ -2,7 +2,7 @@
  * This file is part of the IMIDJ - IMage Incremental Deltafragment Joiner
  * (https://github.com/mbessler/imidj)
  *
- * Copyright (c) 2019 Manuel Bessler
+ * Copyright (c) 2019-20 Manuel Bessler
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -80,12 +80,12 @@ typedef enum {
 typedef gboolean (*mode_dispatch_handler_t)(int argc, char **argv);
 
 typedef struct __attribute__((packed/*, aligned(4)*/)) {
-    uint16_t formatversion; //2
-    uint32_t winsize;  //4
-    uint32_t chunkmask;  //4
-    uint32_t minchunksize; //4
-    uint8_t fullfilehash[16];  //16
-    // total: 30bytes
+    uint16_t formatversion; /*2*/
+    uint32_t winsize;  /*4*/
+    uint32_t chunkmask;  /*4*/
+    uint32_t minchunksize; /*4*/
+    uint8_t fullfilehash[16];  /*16*/
+    /* total: 30bytes */
 } chidx_header_t; /* header block of chunk index file, minus the file signature itself */
 
 typedef struct __attribute__((packed /*, aligned(4)*/)) {
@@ -303,7 +303,7 @@ static gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArr
             exit(9);
         }
         g_print("headerinfo: image checksum=%s\n", hexdigest);
-        g_free(hexdigest);
+        free(hexdigest);
     }
 
     gint i = 0;
@@ -333,7 +333,7 @@ static gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArr
                 exit(9);
             }
             g_print("Read Chunk Index [%d] size=%d hash=%s\n", i, record->chunk_record.l, hexdigest);
-            g_free(hexdigest);
+            free(hexdigest);
         }
 
         i += 1;
@@ -447,7 +447,7 @@ static gboolean lzip_decompress(int infd, int outfd, int * ret_compressed_size) 
 
 static size_t lzip_compress(int outfd, uint8_t * data, int len) {
     const unsigned long long member_size = 0x7FFFFFFFFFFFFFFFULL; /* INT64_MAX */
-    enum { buffer_size = 65536 };
+    enum { buffer_size = 1024*128 };
     uint8_t buffer[buffer_size];
     struct Lzma_options {
         int dictionary_size;                /* 4 KiB .. 512 MiB */
@@ -517,7 +517,7 @@ static size_t lzip_compress(int outfd, uint8_t * data, int len) {
         total_written += comp_read;
     } while(LZ_compress_finished(encoder) != 1);
 
-    // save some compression stats
+    /* save some compression stats */
     const unsigned long long in_size = LZ_compress_total_in_size(encoder);
     const unsigned long long out_size = LZ_compress_total_out_size(encoder);
     if( in_size == 0 || out_size == 0 ) {
@@ -581,7 +581,7 @@ static gboolean lzma_decompress(int infd, int outfd, int * ret_compressed_size) 
                 (*ret_compressed_size) += num_read;
             }
 
-            // if input EOF, set LZMA_FINISH
+            /* if input EOF, set LZMA_FINISH */
             if (ineof){
                 action = LZMA_FINISH;
             }
@@ -642,7 +642,7 @@ static gboolean lzma_decompress(int infd, int outfd, int * ret_compressed_size) 
 
 
 static size_t lzma_compress(int outfd, uint8_t * data, int len) {
-    uint32_t lz_preset = 6; // 6 since any higher than 6 requires a lot more memory during decompress on the target
+    uint32_t lz_preset = 6; /* 6 since any higher than 6 requires a lot more memory during decompress on the target */
     lzma_stream lz_strm = LZMA_STREAM_INIT;
     lzma_ret lz_ret;
     if ((lz_ret = lzma_easy_encoder(&lz_strm, lz_preset, LZMA_CHECK_CRC64/*-1 in py impl */)) != LZMA_OK) {
@@ -681,7 +681,7 @@ static size_t lzma_compress(int outfd, uint8_t * data, int len) {
                 exit(52);
             }
             total_written += write_size;
-            // Reset next_out and avail_out.
+            /* Reset next_out and avail_out. */
             lz_strm.next_out = outbuf;
             lz_strm.avail_out = sizeof(outbuf);
         }
@@ -775,19 +775,13 @@ static int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * 
             break;
         }
 
-        // md5 hash the chunk
+        /* md5 hash the chunk */
         uint8_t digest[MD5_DIGEST_LENGTH];
         MD5_CTX mdctx;
         MD5_Init(&mdctx);
         MD5_Update(&mdctx, chunk.data, chunk.len);
         MD5_Final(digest, &mdctx);
-
-        gchar hexdigest[MD5_DIGEST_LENGTH*2+1] = { 0};
-        for(int _i = 0; _i < MD5_DIGEST_LENGTH; _i++) {
-            gchar hexdigit[3];
-            g_snprintf(hexdigit, 3, "%02x", digest[_i]);
-            g_strlcat(hexdigest, hexdigit, MD5_DIGEST_LENGTH*2+1);
-        }
+        gchar * hexdigest = hexlify_md5(digest);
 
         if (chunk_refcnt_table != NULL) {
             GBytes * gb_key = g_bytes_new(digest, MD5_DIGEST_LENGTH);
@@ -795,19 +789,14 @@ static int index_a_file(char * filename, GPtrArray *chunk_records, GHashTable * 
                 /* increment by 1 */
                 long * val = (long *)(g_hash_table_lookup(chunk_refcnt_table, gb_key));
                 (*val) += 1;
-                //g_print("%02ld   ", *val);
-                //g_hash_table_replace(chunk_refcnt_table, gb_key,
-                //                     (void *)(
-                //                         (long)(g_hash_table_lookup(chunk_refcnt_table, gb_key)) + 1
-                //                         ));
             } else {
                 long * val = malloc(sizeof(long));
                 *val = 1;
-                //g_print("%02ld ", *val);
                 g_hash_table_insert(chunk_refcnt_table, gb_key, val);
             }
         }
         g_print("%s\n", hexdigest);
+        free(hexdigest);
 
         record->num = i;
         record->offset = offset;
@@ -862,7 +851,7 @@ static int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_
         char * chblo_path = NULL;
         gchar * hexdigest = hexlify_md5(record->chunk_record.chunkhash);
         chblo_path = g_strdup_printf("%s/%s.chblo" CHUNK_EXT, chblo_dir, hexdigest);
-        g_free(hexdigest);
+        free(hexdigest);
 
         if (g_mkdir_with_parents(chblo_dir, 0755) < 0) {
             g_printerr("Cannot create output directory for chunk '%s': %s\n", chblo_dir, g_strerror(errno));
@@ -948,12 +937,17 @@ static int write_chidx(char * idx_filename, char * img_filename, uint8_t * whole
     return(0);
 }
 
+static void chunk_record_free_func(chidx_chunk_record_t * record) {
+    g_free(record);
+}
+
 static int indexer_main(void)
 {
     char * image_path = realpath(indexer_image, NULL);
-    if (image_path == NULL) g_printerr("image_path is NULL: %s\n", g_strerror(errno));
-    // todo error handling
-
+    if (image_path == NULL) {
+        g_printerr("image_path is NULL: %s\n", g_strerror(errno));
+        exit(33);
+    }
     gchar * image_dir = g_path_get_dirname(image_path);
     gchar * image_fname = g_path_get_basename(image_path);
 
@@ -985,8 +979,8 @@ static int indexer_main(void)
     uint8_t * wholefile_digest = whole_file_checksum(image_path);
 
     g_print("indexing...\n");
-    GPtrArray * chunk_records = g_ptr_array_new();
-    GHashTable * chunk_refcnt_table = g_hash_table_new(g_bytes_hash, g_bytes_equal);
+    GPtrArray * chunk_records = g_ptr_array_new_with_free_func((GDestroyNotify)chunk_record_free_func);
+    GHashTable * chunk_refcnt_table = g_hash_table_new_full(g_bytes_hash, g_bytes_equal, (GDestroyNotify)g_bytes_unref, (GDestroyNotify)free);
     index_a_file(image_path, chunk_records, chunk_refcnt_table);
     g_print("chunk_records = %p\n", (void *)chunk_records);
     write_chidx(index_path, image_path, wholefile_digest, chunk_records);
@@ -1008,26 +1002,23 @@ static int indexer_main(void)
     }
     g_print("chunks total: %d  unique: %d\n", total_chunks, unique_chunks);
 
-    g_ptr_array_free(chunk_records, TRUE); // TODO do other cleanup/free stuff required by GPtrArray
-    g_hash_table_destroy(chunk_refcnt_table); // TODO do other cleanup as needed for hash tables
-
-
     g_print("MD5 of image file: ");
     for(int i = 0; i < MD5_DIGEST_LENGTH; i++) {
         g_print("%02x", wholefile_digest[i]);
     }
     g_print("\n");
 
-    g_free(indexer_image);
-    g_free(indexer_outdir);
-    free(image_path);
-    free(outputdir);
-    free(wholefile_digest);
-    g_free(image_dir);
-    g_free(image_fname);
-    g_free(index_path);
-
+    /* cleanup */
     g_close(fd, NULL);
+    g_hash_table_destroy(chunk_refcnt_table);
+    g_ptr_array_free(chunk_records, TRUE);
+    free(wholefile_digest);
+    g_free(index_path);
+    free(outputdir);
+    g_free(image_fname);
+    g_free(image_dir);
+    free(image_path);
+
     return 0;
 }
 
@@ -1045,7 +1036,7 @@ static int differ_main(void)
 
     for(int idx=0; idx < 2; idx++) {
         if (image_path[idx] == NULL) g_printerr("image_path is NULL: %s\n", g_strerror(errno));
-        // todo error handling
+        /* todo error handling*/
 
         image_dir[idx] = g_path_get_dirname(image_path[idx]);
         image_fname[idx] = g_path_get_basename(image_path[idx]);
@@ -1066,8 +1057,8 @@ static int differ_main(void)
         wholefile_digest[idx] = whole_file_checksum(image_path[idx]);
 
         g_print("indexing...\n");
-        chunk_records[idx] = g_ptr_array_new();
-        chunk_refcnt_table[idx] = g_hash_table_new(g_bytes_hash, g_bytes_equal);
+        chunk_records[idx] = g_ptr_array_new_with_free_func((GDestroyNotify)chunk_record_free_func);
+        chunk_refcnt_table[idx] = g_hash_table_new_full(g_bytes_hash, g_bytes_equal, (GDestroyNotify)g_bytes_unref, (GDestroyNotify)free);
         index_a_file(image_path[idx], chunk_records[idx], chunk_refcnt_table[idx]);
         g_print("chunk_records = %p\n", (void *)chunk_records[idx]);
         g_close(fd, NULL);
@@ -1080,7 +1071,7 @@ static int differ_main(void)
         g_print("File A has %d chunks, but file B has %d chunks\n", chunk_records[0]->len, chunk_records[1]->len);
     }
 
-    //unsigned int min_c = (chunk_records[0]->len < chunk_records[1]->len) ? chunk_records[0]->len : chunk_records[1]->len;
+    /*unsigned int min_c = (chunk_records[0]->len < chunk_records[1]->len) ? chunk_records[0]->len : chunk_records[1]->len;*/
     unsigned int max_c = (chunk_records[0]->len > chunk_records[1]->len) ? chunk_records[0]->len : chunk_records[1]->len;
 
     for (unsigned int i = 0; i < max_c; i++)
@@ -1091,7 +1082,7 @@ static int differ_main(void)
         for (int idx=0; idx<2; idx++) {
             if (i < chunk_records[idx]->len) {
                 record[idx] = g_ptr_array_index(chunk_records[idx], i);
-                // num should be same as i
+                /* num should be same as i */
                 if (record[idx]->num != i) {
                     g_print("Numbering issue in file %c at %d\n", (idx==0)?'A':'B', i);
                 }
@@ -1102,7 +1093,7 @@ static int differ_main(void)
 
         g_print("Chunk %d |", i);
 
-        if (i < chunk_records[0]->len && i < chunk_records[1]->len) { // chunks in both
+        if (i < chunk_records[0]->len && i < chunk_records[1]->len) { /* chunks in both */
             hexdigest[0] = hexlify_md5(record[0]->chunk_record.chunkhash);
             hexdigest[1] = hexlify_md5(record[1]->chunk_record.chunkhash);
             if (record[0]->offset != record[1]->offset) {
@@ -1121,10 +1112,10 @@ static int differ_main(void)
                 g_print(" chunksums identical %s |", hexdigest[0]);
             }
 
-        } else if (i < chunk_records[0]->len) { // chunk exists only in A
+        } else if (i < chunk_records[0]->len) { /* chunk exists only in A */
             hexdigest[0] = hexlify_md5(record[0]->chunk_record.chunkhash);
             g_print("Only in A: offset=%"PRIu64"  len=%d  chunksum=%s\n", record[0]->offset, record[0]->chunk_record.l, hexdigest[0]);
-        } else { // chunk exists only in B
+        } else { /* chunk exists only in B */
             hexdigest[1] = hexlify_md5(record[1]->chunk_record.chunkhash);
             g_print("Only in B: offset=%"PRIu64"  len=%d  chunksum=%s\n", record[1]->offset, record[1]->chunk_record.l, hexdigest[1]);
         }
@@ -1134,22 +1125,15 @@ static int differ_main(void)
         g_print("\n");
     }
 
-
-    g_ptr_array_free(chunk_records[0], TRUE); // TODO do other cleanup/free stuff required by GPtrArray
-    g_hash_table_destroy(chunk_refcnt_table[0]); // TODO do other cleanup as needed for hash tables
-    g_ptr_array_free(chunk_records[1], TRUE); // TODO do other cleanup/free stuff required by GPtrArray
-    g_hash_table_destroy(chunk_refcnt_table[1]); // TODO do other cleanup as needed for hash tables
-
-    g_free(differ_image1);
-    g_free(differ_image2);
-    free(image_path[0]);
-    free(image_path[1]);
-    free(wholefile_digest[0]);
-    free(wholefile_digest[1]);
-    g_free(image_dir[0]);
-    g_free(image_fname[0]);
-    g_free(image_dir[1]);
-    g_free(image_fname[1]);
+    /* cleanup */
+    for(int idx=0; idx < 2; idx++) {
+        g_hash_table_destroy(chunk_refcnt_table[idx]);
+        g_ptr_array_free(chunk_records[idx], TRUE);
+        free(wholefile_digest[idx]);
+        g_free(image_fname[idx]);
+        g_free(image_dir[idx]);
+        free(image_path[idx]);
+    }
 
     return 0;
 }
@@ -1181,7 +1165,7 @@ static char * abspath_mkdir(gchar * relpath) {
 static size_t receive_data_from_curl(void *buffer, size_t size, size_t nmemb, void *userp)
 {
     int tempfd = *(int *)userp;
-    //decompress_stream(buffer, size*nmemb, tfd);
+    /* decompress_stream(buffer, size*nmemb, tfd); */
     if (write(tempfd, buffer, size*nmemb) < 0) {
         g_printerr("handler for remote retrieval encountered a write error to temp file: %s\n", g_strerror(errno));
         exit(99);
@@ -1239,7 +1223,7 @@ static int analyzer_main(void)
     char * index_path = realpath(analyzer_index_file, NULL);
 
     /* load chunk index file */
-    GPtrArray *chunk_list = g_ptr_array_new();
+    GPtrArray *chunk_list = g_ptr_array_new_with_free_func((GDestroyNotify)chunk_record_free_func);
     chidx_header_t index_hdr;
     parse_chidx(index_path, &index_hdr, chunk_list);
     if (! analyzer_dump_not_header) {
@@ -1275,11 +1259,10 @@ static int analyzer_main(void)
             exit(9);
         }
         g_print("Image File Checksum: %s\n", hexdigest);
-        g_free(hexdigest);
+        free(hexdigest);
 
         g_print("Image File Size: %ld\n", imglen);
     }
-
 
     if (analyzer_dump_chunksums) {
         off_t offset=0;
@@ -1292,11 +1275,13 @@ static int analyzer_main(void)
                 exit(9);
             }
             g_print("Chunk #%d offset=0x%08lx size=%d chunksum=%s\n", i, offset, record->chunk_record.l, hexdigest);
-            g_free(hexdigest);
+            free(hexdigest);
             offset +=record->chunk_record.l;
         }
     }
 
+    free(index_path);
+    g_ptr_array_free(chunk_list, TRUE);
     return (0);
 }
 
@@ -1332,7 +1317,8 @@ static int patcher_main(int num_reference_images)
     gchar * target_index_fname = g_path_get_basename(target_index_path);
 
     /* load target chunk index file */
-    GPtrArray *target_chunk_list = g_ptr_array_new();
+    GPtrArray *target_chunk_list = g_ptr_array_new_with_free_func((GDestroyNotify)chunk_record_free_func);
+
     chidx_header_t target_index_hdr;
     GPtrArray *reference_chunk_list[num_reference_images];
     chidx_header_t reference_index_hdr[num_reference_images];
@@ -1351,31 +1337,36 @@ static int patcher_main(int num_reference_images)
             g_printerr("reference image file not found: '%s'\n", patcher_reference_image_array[i]);
             exit(63);
         }
-        reference_chunk_list[i] = g_ptr_array_new();
+        reference_chunk_list[i] = g_ptr_array_new_with_free_func((GDestroyNotify)chunk_record_free_func);
         parse_chidx(patcher_reference_index_array[i], &(reference_index_hdr[i]), reference_chunk_list[i]);
         /* check if MD5 from index matches reference image full file checksum */
         g_print("checksumming image '%s' ...\n", patcher_reference_image_array[i]);
         uint8_t * reference_file_digest = whole_file_checksum(patcher_reference_image_array[i]);
         if (memcmp(reference_index_hdr[i].fullfilehash, reference_file_digest, MD5_DIGEST_LENGTH) != 0) {
             g_printerr("checksum mismatch between reference image file and what index file says it should be:\n");
-            g_printerr("    checksum stored in index file '%s': %s\n", patcher_reference_index_array[i], hexlify_md5(reference_index_hdr[i].fullfilehash));
-            g_printerr("    checksum of image file '%s': %s\n", patcher_reference_image_array[i], hexlify_md5(reference_file_digest));
+            gchar * hexdigest_index_hdr = hexlify_md5(reference_index_hdr[i].fullfilehash);
+            gchar * hexdigest_ref = hexlify_md5(reference_file_digest);
+            g_printerr("    checksum stored in index file '%s': %s\n", patcher_reference_index_array[i], hexdigest_index_hdr);
+            g_printerr("    checksum of image file '%s': %s\n", patcher_reference_image_array[i], hexdigest_ref);
+            free(hexdigest_ref);
+            free(hexdigest_index_hdr);
+            free(reference_file_digest);
             if (! patcher_skip_mismatched_refs) {
                 /* mismatch of image and chunk-index, do not use this reference */
                 g_ptr_array_free(reference_chunk_list[i], TRUE);
+                reference_chunk_list[i] = NULL;
                 reference_image_fds[i] = -1;
                 continue;
             } else {
                 exit(64);
             }
         }
-        free(reference_file_digest);
 
         /* open image files for read access */
         reference_image_fds[i] = g_open(patcher_reference_image_array[i], O_RDONLY);
         if (reference_image_fds[i] < 0) {
             g_printerr("Cannot open reference image file '%s': %s\n", patcher_reference_image_array[i], g_strerror(errno));
-            //exit(65);
+            /* exit(65); */
             reference_image_fds[i] = -1;
             continue;
         }
@@ -1387,7 +1378,7 @@ static int patcher_main(int num_reference_images)
         target_image_exists = TRUE;
     }
 
-    GPtrArray *target_asis_chunk_list = g_ptr_array_new();
+    GPtrArray *target_asis_chunk_list = g_ptr_array_new_with_free_func((GDestroyNotify)chunk_record_free_func);
     /* handle incremental updates of target image, ie. interrupted updates. */
     if (target_image_exists && ! patcher_force_overwrite) {
         /* first, checksum of whole file, maybe we can avoid indexing it if its already complete */
@@ -1397,9 +1388,12 @@ static int patcher_main(int num_reference_images)
             chidx_chunk_record_t * target_record = g_ptr_array_index(target_chunk_list, target_chunk_list->len - 1);
             patch_stats.bytes_already_present += target_record->offset + target_record->chunk_record.l;
             patch_stats.chunks_already_present = target_chunk_list->len;
+            free(wholefile_digest);
             /* image already complete, so we're done */
-            goto index_done;
+            goto patcher_index_done;
         }
+        free(wholefile_digest);
+
         /* index target image */
         index_a_file(target_image_path, target_asis_chunk_list, NULL);
         /* target_asis_chunk_list  aka   outimg_chunksums = [] */
@@ -1434,9 +1428,10 @@ static int patcher_main(int num_reference_images)
         /* first check if chunk is already in place, if: target_image_exists && ! patcher_force_overwrite   and make sure we're not running over the end of asis list */
         if (target_image_exists && ! patcher_force_overwrite && target_asis_chunk_list->len > i) {
             chidx_chunk_record_t * target_asis_record = g_ptr_array_index(target_asis_chunk_list, i);
-            // not only compare the chunks here, but also the offset since things might have shifted.
-            // In that case, just depend on other sources for this block instead of trying to copy since
-            // it was most likely already overwritten by a previous chunk.
+            /* not only compare the chunks here, but also the offset since things might have shifted.
+             * In that case, just depend on other sources for this block instead of trying to copy since
+             * it was most likely already overwritten by a previous chunk.
+             */
             if (target_record->offset == target_asis_record->offset &&
                 memcmp(target_record->chunk_record.chunkhash, target_asis_record->chunk_record.chunkhash, MD5_DIGEST_LENGTH) == 0) {
                 g_print("chunk %d already correct in target image\n", i);
@@ -1457,6 +1452,10 @@ static int patcher_main(int num_reference_images)
         for(int r=0; r<num_reference_images; r++) {
             /* skip reference image if its fd is -1 */
             if (reference_image_fds[r] < 0) {
+                continue;
+            }
+            /* skip empty and discarded reference images */
+            if (reference_chunk_list[r] == NULL) {
                 continue;
             }
             /* future optimization: use a hash to look up the index instead of iterating over list  */
@@ -1524,14 +1523,13 @@ static int patcher_main(int num_reference_images)
             patch_stats.bytes_fetched_actual += chunk_compressed_size;
             close(chblo_fd);
             g_free(chblo_path);
-            //continue;
+            /*continue;*/
         } else { /* remote url */
             gchar tmpfilename[] = "/tmp/.chblo.XXXXXX";
             gchar * chblo_url = g_strdup_printf("%s/chunks/%02x/%s.chblo" CHUNK_EXT, patcher_url, target_record->chunk_record.chunkhash[0], hexdigest);
             int tempfd = g_mkstemp(tmpfilename);
             unlink(tmpfilename);
             curl_easy_setopt(ceh, CURLOPT_WRITEDATA, &tempfd);
-            //curl_easy_setopt(ceh, CURLOPT_WRITEDATA, &tfd);
             g_print("retrieving chunk #%d with checksum %s from remote URL '%s'\n", i, hexdigest, chblo_url);
             CURLcode res = curl_easy_setopt(ceh, CURLOPT_URL, chblo_url);
             if (res != CURLE_OK) {
@@ -1546,7 +1544,7 @@ static int patcher_main(int num_reference_images)
                 if (res == CURLE_OK) {
                     break;
                 }
-                // retry immediately on some curl errors, sleep for a while and retry on timeout errors, and fail immediatly on all others
+                /* retry immediately on some curl errors, sleep for a while and retry on timeout errors, and fail immediatly on all others */
                 if (res == CURLE_FTP_ACCEPT_TIMEOUT || res == CURLE_OPERATION_TIMEDOUT) {
                     g_print("curl operation timeout, sleeping for %d ms before retry\n", patcher_dl_timeout_sleep_ms);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
@@ -1568,7 +1566,7 @@ static int patcher_main(int num_reference_images)
                     ) {
                     continue;
                 }
-                break; // all other errors
+                break; /* all other errors */
             }
             if (res != CURLE_OK) {
                 size_t len = strlen(cerrbuf);
@@ -1587,15 +1585,37 @@ static int patcher_main(int num_reference_images)
             lzma_decompress(tempfd, tfd, &chunk_compressed_size);
 #endif /* LZIP/LZMA */
 
+
+
+            /* read-back and checksum the decompressed chunk*/
+            /*{
+                uint8_t buf[target_record->chunk_record.l];
+                lseek(tfd, target_record->offset, SEEK_SET);
+                if( read(tfd, &buf, target_record->chunk_record.l) != target_record->chunk_record.l ) {
+                    g_printerr("error during read-back of written, decompressed new chunk: %s\n", g_strerror(errno));
+                    exit(200);
+                }
+
+                // md5 hash the chunk
+                uint8_t digest[MD5_DIGEST_LENGTH];
+                MD5_CTX mdctx;
+                MD5_Init(&mdctx);
+                MD5_Update(&mdctx, &buf, target_record->chunk_record.l);
+                MD5_Final(digest, &mdctx);
+                gchar * hexdigest2 = hexlify_md5(digest);
+                g_print("Chunk #%d written, checksum after write: %s\n", i, hexdigest2);
+                free(hexdigest2);
+                }*/
+
             patch_stats.bytes_fetched += target_record->chunk_record.l;
             patch_stats.bytes_fetched_actual += chunk_compressed_size;
             close(tempfd);
             g_free(chblo_url);
         }
-        g_free(hexdigest);
+        free(hexdigest);
     }
 
-    // truncate if img was larger that final size
+    /* truncate if img was larger that final size */
     if (ftruncate(tfd, imglen) < 0) {
         g_printerr("Warning, cannot truncate target image file '%s': %s\n", target_image_path, g_strerror(errno));
     }
@@ -1605,30 +1625,39 @@ static int patcher_main(int num_reference_images)
 
     if (! patcher_skip_verify) {
         uint8_t * wholefile_digest = whole_file_checksum(target_image_path);
+        gchar * hexdigest = hexlify_md5(wholefile_digest);
         if (memcmp(wholefile_digest, target_index_hdr.fullfilehash, MD5_DIGEST_LENGTH) != 0) {
-            g_printerr("verify failed, checksum mismatch: expected %s, found %s\n", hexlify_md5(target_index_hdr.fullfilehash), hexlify_md5(wholefile_digest));
+            gchar * hexdigest_index_hdr = hexlify_md5(target_index_hdr.fullfilehash);
+            g_printerr("verify failed, checksum mismatch: expected %s, found %s\n", hexdigest_index_hdr, hexdigest);
+            free(hexdigest_index_hdr);
             exit(73);
         } else {
-            g_print("verify ok, image checksum is %s\n", hexlify_md5(wholefile_digest));
+            g_print("verify ok, image checksum is %s\n", hexdigest);
         }
+        free(hexdigest);
         free(wholefile_digest);
     }
 
     /* write a json file with stats of the patching operation */
     patcher_stats_to_json();
 
-index_done:
-    // todo free target_chunk_list
-    g_free(target_index_dir);
+patcher_index_done:
+    g_ptr_array_free(target_asis_chunk_list, TRUE);
+    g_ptr_array_free(target_chunk_list, TRUE);
     g_free(target_index_fname);
-    g_free(target_image_dir);
-    g_free(target_image_fname);
-
-    free(target_image_path);
+    g_free(target_index_dir);
     free(target_index_path);
 
-    //TODO g_free  target_chunk_list
-    //TODO g_free reference_chunk_list[]
+    g_free(target_image_fname);
+    g_free(target_image_dir);
+    free(target_image_path);
+
+    for(int i=0; i<num_reference_images; i++) {
+        if (reference_chunk_list[i] != NULL) {
+            g_ptr_array_free(reference_chunk_list[i], TRUE);
+        }
+    }
+
     /* close reference images */
     for(int i=0; i<num_reference_images; i++) {
         if (reference_image_fds[i] < 0) {
@@ -1656,9 +1685,10 @@ static int patch_args(int argc, char ** argv)
         g_printerr ("%s\n", error->message);
         g_error_free(error);
         usage(context);
-        return(1);
+        g_option_context_free(context);
+       return(1);
     }
-    g_option_context_free (context);
+    g_option_context_free(context);
 
     if (patcher_url == NULL) {
         g_print("%s: required argument -u/--url missing\n", g_get_prgname());
@@ -1705,7 +1735,6 @@ static int patch_args(int argc, char ** argv)
         g_print("ok, no reference images!\n");
     }
 
-
     char * uri_scheme = g_uri_parse_scheme(patcher_url);
     url_is_local = FALSE;
 
@@ -1715,16 +1744,19 @@ static int patch_args(int argc, char ** argv)
         } else if (g_strcmp0(uri_scheme, "ftp") == 0) {
         } else if (g_strcmp0(uri_scheme, "file") == 0) {
             url_is_local = TRUE;
-            //patcher_url += strlen("file://") ;
+            /*patcher_url += strlen("file://") ;*/
         } else {
         }
     } else {
         url_is_local = TRUE;
     }
     g_print("URL: is %slocal\n", (url_is_local)?"":"not");
-    free(uri_scheme);
+    g_free(uri_scheme);
 
-    return(patcher_main(num_reference_images));
+    int ret = patcher_main(num_reference_images);
+    g_free(patcher_index_file);
+    g_free(patcher_out_img);
+    return ret;
 }
 
 static int analyze_args(int argc, char ** argv)
@@ -1742,9 +1774,10 @@ static int analyze_args(int argc, char ** argv)
         g_printerr ("%s\n", error->message);
         g_error_free(error);
         usage(context);
+        g_option_context_free(context);
         return(1);
     }
-    g_option_context_free (context);
+    g_option_context_free(context);
 
     if (analyzer_rest == NULL || analyzer_rest[0] == NULL)
     {
@@ -1757,9 +1790,10 @@ static int analyze_args(int argc, char ** argv)
         exit(1);
     }
 
-    analyzer_index_file = g_strdup (analyzer_rest[0]);
-
-    return(analyzer_main());
+    analyzer_index_file = g_strdup(analyzer_rest[0]);
+    int ret = analyzer_main();
+    g_free(analyzer_index_file);
+    return ret;
 }
 
 
@@ -1778,10 +1812,11 @@ static int index_args(int argc, char ** argv) {
         g_printerr ("%s\n", error->message);
         g_error_free(error);
         usage(context);
+        g_option_context_free(context);
         return(1);
     }
 
-    g_option_context_free (context);
+    g_option_context_free(context);
 
     if (indexer_rest == NULL || indexer_rest[0] == NULL)
     {
@@ -1801,7 +1836,10 @@ static int index_args(int argc, char ** argv) {
 
     indexer_image = g_strdup (indexer_rest[0]);
     indexer_outdir = g_strdup (indexer_rest[1]);
-    return(indexer_main());
+    int ret = indexer_main();
+    g_free(indexer_outdir);
+    g_free(indexer_image);
+    return ret;
 }
 
 static int diff_args(int argc, char ** argv) {
@@ -1818,6 +1856,7 @@ static int diff_args(int argc, char ** argv) {
         g_printerr ("%s\n", error->message);
         g_error_free(error);
         usage(context);
+        g_option_context_free(context);
         return(1);
     }
 
@@ -1841,7 +1880,10 @@ static int diff_args(int argc, char ** argv) {
 
     differ_image1 = g_strdup (differ_rest[0]);
     differ_image2 = g_strdup (differ_rest[1]);
-    return(differ_main());
+    int ret = differ_main();
+    g_free(differ_image2);
+    g_free(differ_image1);
+    return ret;
 }
 
 
