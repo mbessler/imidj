@@ -1,5 +1,4 @@
 WITH_LZMA ?= 0
-WITH_LZIP ?= 1
 STRICT_COMPILE ?= 1
 
 ifeq ($(WITH_LZMA),1)
@@ -8,11 +7,9 @@ LZMA_LDFLAGS=
 LZMA_CFLAGS=-DLZMA=1
 endif
 
-ifeq ($(WITH_LZIP),1)
 LZIP_LIBS=-llz
 LZIP_LDFLAGS=
 LZIP_CFLAGS=-DLZIP=1
-endif
 
 
 CFLAGS ?= -g
