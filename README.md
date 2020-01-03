@@ -1,4 +1,5 @@
 [![Build Status](https://travis-ci.com/mbessler/imidj.svg?branch=master)](https://travis-ci.com/mbessler/imidj)
+[![Coverity Scan Build Status](https://scan.coverity.com/projects/20112/badge.svg)](https://scan.coverity.com/projects/mbessler-imidj)
 
 # imidj - IMage Incremental Deltafragment Joiner
 [`imidj`](https://github.com/mbessler/imidj) (pronouced like "image") is a tool like [casync](https://github.com/systemd/casync) but simpler as it focuses only on chunking and re-assembling chunks into images again. 
