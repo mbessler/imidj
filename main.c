@@ -957,6 +957,10 @@ static int indexer_main(void)
     }
 
     char * outputdir = realpath(indexer_outdir, NULL);
+    if (outputdir == NULL) {
+        g_printerr("outputdir is NULL: %s\n", g_strerror(errno));
+        exit(33);
+    }
     char * index_path = g_strdup_printf("%s/%s%s", outputdir, image_fname, ".chidx");
 
     if (! g_file_test(image_path, (G_FILE_TEST_EXISTS | G_FILE_TEST_IS_REGULAR))) {
@@ -1033,6 +1037,10 @@ static int differ_main(void)
 
     image_path[0] = realpath(differ_image1, NULL);
     image_path[1] = realpath(differ_image2, NULL);
+    if (image_path[0] == NULL || image_path[1] == NULL) {
+        g_printerr("image_path[0|1] is NULL: %s\n", g_strerror(errno));
+        exit(33);
+    }
 
     for(int idx=0; idx < 2; idx++) {
         if (image_path[idx] == NULL) g_printerr("image_path is NULL: %s\n", g_strerror(errno));
@@ -1155,6 +1163,11 @@ static char * abspath_mkdir(gchar * relpath) {
     }
     gchar * fname = g_path_get_basename(relpath);
     char * dirname_abs = realpath(dirname, NULL);
+    if (dirname_abs == NULL) {
+        g_printerr("dirname_abs is NULL: %s\n", g_strerror(errno));
+        exit(33);
+    }
+
     char * abspath = g_strdup_printf("%s/%s", dirname_abs, fname);
     free(dirname_abs);
     free(fname);
@@ -1221,6 +1234,10 @@ static int analyzer_main(void)
     }
 
     char * index_path = realpath(analyzer_index_file, NULL);
+    if (index_path == NULL) {
+        g_printerr("index_path is NULL: %s\n", g_strerror(errno));
+        exit(33);
+    }
 
     /* load chunk index file */
     GPtrArray *chunk_list = g_ptr_array_new_with_free_func((GDestroyNotify)chunk_record_free_func);
@@ -1309,10 +1326,20 @@ static int patcher_main(int num_reference_images)
     }
 
     char * target_image_path = abspath_mkdir(patcher_out_img);
+    if (target_image_path == NULL) {
+        g_printerr("target_image_path is NULL: %s\n", g_strerror(errno));
+        exit(33);
+    }
+
     gchar * target_image_dir = g_path_get_dirname(target_image_path);
     gchar * target_image_fname = g_path_get_basename(target_image_path);
 
     char * target_index_path = realpath(patcher_index_file, NULL);
+    if (target_index_path == NULL) {
+        g_printerr("target_index_path is NULL: %s\n", g_strerror(errno));
+        exit(33);
+    }
+
     gchar * target_index_dir = g_path_get_dirname(target_index_path);
     gchar * target_index_fname = g_path_get_basename(target_index_path);
 
@@ -1578,7 +1605,10 @@ static int patcher_main(int num_reference_images)
                 exit(72);
             }
 
-            lseek(tempfd, 0, SEEK_SET);
+            if (lseek(tempfd, 0, SEEK_SET) < 0) {
+                g_printerr("Cannot seek downloaded chunk file '%s': %s\n", tmpfilename, g_strerror(errno));
+                exit(74);
+            }
 #ifdef LZIP
             lzip_decompress(tempfd, tfd, &chunk_compressed_size);
 #elif LZMA
