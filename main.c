@@ -137,6 +137,7 @@ static gboolean url_is_local = FALSE;
 static gchar* analyzer_index_file = NULL;
 static gboolean analyzer_dump_chunksums = FALSE;
 static gboolean analyzer_dump_not_header = FALSE;
+static gboolean analyzer_dump_chunkpaths = FALSE;
 static gchar** analyzer_rest = NULL;
 
 static gchar* differ_image1 = NULL;
@@ -190,6 +191,7 @@ GOptionEntry analyzer_entries[] = {
     /* optional args */
     {"chunksums", '\0', 0, G_OPTION_ARG_NONE, &analyzer_dump_chunksums, "Also dump the chunksums, not just the header", NULL},
     {"no-header", '\0', 0, G_OPTION_ARG_NONE, &analyzer_dump_not_header, "Skip dumping the header, useful with --chunksums", NULL},
+    {"chunkpaths", '\0', 0, G_OPTION_ARG_NONE, &analyzer_dump_chunkpaths, "Dump only the relative chunkpaths (implies --no-header)", NULL},
     {"verbose", 'v', 0, G_OPTION_ARG_NONE, &opt_verbose, "Increase output verbosity", NULL },
     /* general */
     {"version", 'V', 0, G_OPTION_ARG_NONE, &opt_version, "Show version information", NULL },
@@ -335,7 +337,8 @@ static gboolean parse_chidx(gchar *chidx_filename, chidx_header_t * hdr, GPtrArr
 
         g_ptr_array_add(chunk_list, (gpointer)record);
     }
-    g_print("chunk index file (%s) contains references to %d chunks\n", chidx_filename, i);
+    if(opt_verbose) {g_print("chunk index file (%s) contains references to %d chunks\n", chidx_filename, i);}
+
     g_close(tchidx, NULL);
     return TRUE;
 }
@@ -1225,7 +1228,9 @@ static void patcher_stats_to_json(void)
 
 static int analyzer_main(void)
 {
-    g_print("analyzing index '%s'\n", analyzer_index_file);
+    if (! analyzer_dump_chunkpaths) {
+        g_print("analyzing index '%s'\n", analyzer_index_file);
+    }
 
     if (! g_file_test(analyzer_index_file, (G_FILE_TEST_EXISTS | G_FILE_TEST_IS_REGULAR))) {
         g_printerr("index file not found: '%s'\n", analyzer_index_file);
@@ -1242,6 +1247,24 @@ static int analyzer_main(void)
     GPtrArray *chunk_list = g_ptr_array_new_with_free_func((GDestroyNotify)chunk_record_free_func);
     chidx_header_t index_hdr;
     parse_chidx(index_path, &index_hdr, chunk_list);
+
+    if (analyzer_dump_chunkpaths) {
+        analyzer_dump_chunksums = FALSE;
+        analyzer_dump_not_header = TRUE;
+
+        for (unsigned int i = 0; i < chunk_list->len; i++)
+        {
+            chidx_chunk_record_t * record = g_ptr_array_index(chunk_list, i);
+            gchar * hexdigest = hexlify_md5(record->chunk_record.chunkhash);
+            if (hexdigest==NULL) {
+                g_printerr("memory allocation error at %s:%d\n", __FILE__, __LINE__);
+                exit(9);
+            }
+            g_print("chunks/%02x/%s.chblo" CHUNK_EXT "\n", record->chunk_record.chunkhash[0], hexdigest);
+            free(hexdigest);
+        }
+    }
+
     if (! analyzer_dump_not_header) {
         g_print("Chunk Index File Format Version: %d\n", index_hdr.formatversion);
         g_print("Chunker Window Size: 0x%08x\n", index_hdr.winsize);
