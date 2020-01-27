@@ -1400,7 +1400,7 @@ static int patcher_main(int num_reference_images)
             free(hexdigest_ref);
             free(hexdigest_index_hdr);
             free(reference_file_digest);
-            if (! patcher_skip_mismatched_refs) {
+            if (patcher_skip_mismatched_refs) {
                 /* mismatch of image and chunk-index, do not use this reference */
                 g_ptr_array_free(reference_chunk_list[i], TRUE);
                 reference_chunk_list[i] = NULL;
