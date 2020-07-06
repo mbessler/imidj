@@ -860,7 +860,7 @@ static int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_
         if (g_file_test(chblo_path, G_FILE_TEST_EXISTS)) {
             g_print("chunk block already exists in chunk store: '%s'\n", chblo_path);
         } else {
-            int chblofd = g_open(chblo_path, O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+            int chblofd = g_open(chblo_path, O_CREAT|O_WRONLY|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
             if (chblofd < 0) {
                 g_printerr("Cannot create chunk chblo file '%s': %s\n", chblo_path, g_strerror(errno));
                 exit(39);
@@ -876,7 +876,7 @@ static int write_chblos(char * img_filename, char * outputdir, GPtrArray *chunk_
         if (g_file_test(chblo_path_xz, G_FILE_TEST_EXISTS)) {
             g_print("chunk block already exists in chunk store: '%s'\n", chblo_path_xz);
         } else {
-            int chblofd = g_open(chblo_path_xz, O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+            int chblofd = g_open(chblo_path_xz, O_CREAT|O_WRONLY|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
             if (chblofd < 0) {
                 g_printerr("Cannot create chunk chblo file '%s': %s\n", chblo_path_xz, g_strerror(errno));
                 exit(39);
@@ -912,7 +912,7 @@ static int write_chidx(char * idx_filename, char * img_filename, uint8_t * whole
         g_printerr("idx_filename is NULL at %s:%d\n", __FILE__, __LINE__);
         exit(34);
     }
-    int fd = g_open(idx_filename, O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+    int fd = g_open(idx_filename, O_CREAT|O_WRONLY|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
     if (fd < 0) {
         g_printerr("Cannot create chunk index file '%s': %s\n", idx_filename, g_strerror(errno));
         exit(35);
@@ -1193,7 +1193,7 @@ static void patcher_stats_to_json(void)
     if(! patcher_stats_out) {
         return;
     }
-    int fd = g_open(patcher_stats_out, O_CREAT|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
+    int fd = g_open(patcher_stats_out, O_CREAT|O_WRONLY|O_TRUNC, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
     if (fd < 0) {
         g_printerr("Cannot create/write json stats file '%s': %s\n", patcher_stats_out, g_strerror(errno));
         return;
@@ -1458,6 +1458,7 @@ static int patcher_main(int num_reference_images)
         exit(66);
     }
     if (patcher_force_overwrite) {
+        g_print("Force-Overwrite active.\n");
         /* truncate and seek to 0 */
         if (ftruncate(tfd, 0) < 0) {
             g_printerr("Cannot truncate target image file '%s': %s\n", target_image_path, g_strerror(errno));
