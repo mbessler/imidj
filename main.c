@@ -1208,7 +1208,7 @@ static void patcher_stats_to_json(void)
                      "    \"bytes_fetched_actual\": %zd,"    \
                      "    \"bytes_local\": %zd,"             \
                      "    \"chunks_already_present\": %d,"  \
-                     "    \"bytes_already_present )\": %zd"  \
+                     "    \"bytes_already_present\": %zd"  \
                      "}",
              patch_stats.chunks_fetched,
              patch_stats.chunks_local,
@@ -1567,6 +1567,7 @@ static int patcher_main(int num_reference_images)
             lzip_decompress(chblo_fd, tfd, &chunk_compressed_size);
             patch_stats.bytes_fetched += target_record->chunk_record.l;
             patch_stats.bytes_fetched_actual += chunk_compressed_size;
+            patch_stats.chunks_fetched += 1;
             close(chblo_fd);
             g_free(chblo_path);
             /*continue;*/
@@ -1656,6 +1657,7 @@ static int patcher_main(int num_reference_images)
 
             patch_stats.bytes_fetched += target_record->chunk_record.l;
             patch_stats.bytes_fetched_actual += chunk_compressed_size;
+            patch_stats.chunks_fetched += 1;
             close(tempfd);
             g_free(chblo_url);
         }
