@@ -223,7 +223,7 @@ GOptionEntry differ_entries[] = {
 static void usage(GOptionContext *context) {
     g_autofree gchar *text = NULL;
     text = g_option_context_get_help(context, FALSE, NULL);
-    g_print("Copyright (C) 2019 by Manuel Bessler\n" \
+    g_print("Copyright (C) 2019-2021 by Manuel Bessler\n" \
             "License: GPLv2\n"                       \
             "\n"                                     \
             "%s", text);
