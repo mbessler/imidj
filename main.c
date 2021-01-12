@@ -62,6 +62,8 @@
 
 #define CHUNK_EXT ".lz"
 
+#define STRINGIFY_(X) #X
+#define STRINGIFY(X) STRINGIFY_(X)
 
 typedef enum {
     IMIDJ_MODE_HELP = 0,
@@ -123,8 +125,14 @@ static gchar * indexer_outdir = NULL;
 static gchar* patcher_index_file = NULL;
 static gchar* patcher_out_img = NULL;
 static gchar* patcher_url = NULL;
-static gint patcher_dl_retry_count_chunk = 3;
-static gint patcher_dl_timeout_sleep_ms = 100;
+#define PATCHER_DL_RETRY_COUNT_DEFAULT (3)
+static gint patcher_dl_retry_count_chunk = PATCHER_DL_RETRY_COUNT_DEFAULT;
+#define PATCHER_DL_RETRY_TIMEOUT_SLEEP_MS_DEFAULT (100)
+static gint patcher_dl_timeout_sleep_ms = PATCHER_DL_RETRY_TIMEOUT_SLEEP_MS_DEFAULT;
+#define PATCHER_DL_CONNECTTIMEOUT_MS_DEFAULT (10000)
+static glong patcher_dl_connecttimeout_ms = PATCHER_DL_CONNECTTIMEOUT_MS_DEFAULT;
+#define PATCHER_DL_REQUESTTIMEOUT_MS_DEFAULT (60000)
+static glong patcher_dl_requesttimeout_ms = PATCHER_DL_REQUESTTIMEOUT_MS_DEFAULT;
 static gboolean patcher_force_overwrite = FALSE;
 static gboolean patcher_skip_mismatched_refs = FALSE;
 static gboolean patcher_skip_verify = FALSE;
@@ -175,8 +183,10 @@ GOptionEntry patcher_entries[] = {
     {"reference-image", 'R', 0, G_OPTION_ARG_FILENAME_ARRAY, &patcher_reference_image_array, "Existing image file as reference (requires matching '-r'; can be specified zero or more times) ", "IMAGEFILE"},
     {"skip-mismatched-references", '\0', 0, G_OPTION_ARG_NONE, &patcher_skip_mismatched_refs, "Skip if a reference image mismatches its chunk index (instead of exit w/ error)", NULL},
     {"skip-verify", '\0',  0, G_OPTION_ARG_NONE, &patcher_skip_verify, "Skip image checksum verification checksum after (re)building from chunks", NULL},
-    {"dl-num-retries", '\0',  0, G_OPTION_ARG_INT, &patcher_dl_retry_count_chunk, "Number of retries for failed chunk downloads (default: 3)", "N"},
-    {"dl-sleep-before-retry", '\0',  0, G_OPTION_ARG_INT, &patcher_dl_timeout_sleep_ms, "Number of milliseconds to sleep before retrying chunk download after a timeout (default: 100)", "MS"},
+    {"dl-num-retries", '\0',  0, G_OPTION_ARG_INT, &patcher_dl_retry_count_chunk, "Number of retries for failed chunk downloads (default: " STRINGIFY(PATCHER_DL_RETRY_COUNT_DEFAULT) ")", "N"},
+    {"dl-sleep-before-retry", '\0',  0, G_OPTION_ARG_INT, &patcher_dl_timeout_sleep_ms, "Number of milliseconds to sleep before retrying chunk download after a timeout (default: " STRINGIFY(PATCHER_DL_RETRY_TIMEOUT_SLEEP_MS_DEFAULT) ")", "MS"},
+    {"dl-connecttimeout", '\0', 0, G_OPTION_ARG_INT, &patcher_dl_connecttimeout_ms, "Number of milliseconds after which a connect attempt is allwed to take before retrying (default: " STRINGIFY(PATCHER_DL_CONNECTTIMEOUT_MS_DEFAULT) ")", "MS"},
+    {"dl-requesttimeout", '\0', 0, G_OPTION_ARG_INT, &patcher_dl_requesttimeout_ms, "Number of milliseconds a chunk download is allowed to take before retrying, applies per chunk (default: " STRINGIFY(PATCHER_DL_REQUESTTIMEOUT_MS_DEFAULT) ")", "MS"},
     {"verbose", 'v', 0, G_OPTION_ARG_NONE, &opt_verbose, "Increase output verbosity", NULL },
     /* general */
     {"version", 'V', 0, G_OPTION_ARG_NONE, &opt_version, "Show version information", NULL },
@@ -1577,6 +1587,10 @@ static int patcher_main(int num_reference_images)
             int tempfd = g_mkstemp(tmpfilename);
             unlink(tmpfilename);
             curl_easy_setopt(ceh, CURLOPT_WRITEDATA, &tempfd);
+            curl_easy_setopt(ceh, CURLOPT_FAILONERROR, 1L);
+            curl_easy_setopt(ceh, CURLOPT_TIMEOUT_MS, patcher_dl_requesttimeout_ms);
+            curl_easy_setopt(ceh, CURLOPT_CONNECTTIMEOUT_MS, patcher_dl_connecttimeout_ms);
+
             g_print("retrieving chunk #%d with checksum %s from remote URL '%s'\n", i, hexdigest, chblo_url);
             CURLcode res = curl_easy_setopt(ceh, CURLOPT_URL, chblo_url);
             if (res != CURLE_OK) {
@@ -1588,29 +1602,35 @@ static int patcher_main(int num_reference_images)
             for(retries=0; retries < patcher_dl_retry_count_chunk; retries++) {
                 cerrbuf[0] = 0;
                 res = curl_easy_perform(ceh);
+                //g_print("curl_easy_perform returned %d\n", res);
                 if (res == CURLE_OK) {
                     break;
                 }
                 /* retry immediately on some curl errors, sleep for a while and retry on timeout errors, and fail immediatly on all others */
                 if (res == CURLE_FTP_ACCEPT_TIMEOUT || res == CURLE_OPERATION_TIMEDOUT) {
-                    g_print("curl operation timeout, sleeping for %d ms before retry\n", patcher_dl_timeout_sleep_ms);
+                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d\n", patcher_dl_timeout_sleep_ms, retries+1);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     continue;
                 }
-                if (res == CURLE_COULDNT_RESOLVE_PROXY
+                if (res == CURLE_HTTP_RETURNED_ERROR ) {
+                    g_printerr("curl http error, sleeping for %d ms before retry #%d\n", patcher_dl_timeout_sleep_ms, retries+1);
+                    g_usleep(1000 * patcher_dl_timeout_sleep_ms);
+                    continue;
+                } else if (res == CURLE_COULDNT_RESOLVE_PROXY
                     || res == CURLE_COULDNT_RESOLVE_HOST
                     || res == CURLE_COULDNT_CONNECT
                     || res == CURLE_FTP_ACCEPT_FAILED
                     || res == CURLE_FTP_CANT_GET_HOST
                     || res == CURLE_PARTIAL_FILE
                     || res == CURLE_FTP_COULDNT_RETR_FILE
-                    || res == CURLE_HTTP_RETURNED_ERROR
                     || res == CURLE_SSL_CONNECT_ERROR
                     || res == CURLE_GOT_NOTHING
                     || res == CURLE_SEND_ERROR
                     || res == CURLE_RECV_ERROR
                     || res == CURLE_SSH
                     ) {
+                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d\n", patcher_dl_timeout_sleep_ms, retries+1);
+                    g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     continue;
                 }
                 break; /* all other errors */
@@ -1629,6 +1649,7 @@ static int patcher_main(int num_reference_images)
                 g_printerr("Cannot seek downloaded chunk file '%s': %s\n", tmpfilename, g_strerror(errno));
                 exit(74);
             }
+            //g_print("decompressing chunk %d in %s ...", i, tmpfilename);
             lzip_decompress(tempfd, tfd, &chunk_compressed_size);
 /*#ifdef LZMA
             lzma_decompress(tempfd, tfd, &chunk_compressed_size);
