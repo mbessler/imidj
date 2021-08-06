@@ -1,18 +1,11 @@
-WITH_LZMA ?= 0
 STRICT_COMPILE ?= 1
-
-ifeq ($(WITH_LZMA),1)
-LZMA_LIBS=$$(pkg-config --libs liblzma)
-LZMA_LDFLAGS=
-LZMA_CFLAGS=-DLZMA=1
-endif
 
 LZIP_LIBS=-llz
 LZIP_LDFLAGS=
 LZIP_CFLAGS=-DLZIP=1
 
 
-CFLAGS ?= -g
+CFLAGS ?= -g -ggdb
 CFLAGS += -O3 -Wall -std=gnu99
 ifeq ($(STRICT_COMPILE),1)
 CFLAGS += -Werror -pedantic
@@ -41,14 +34,11 @@ endif # STRICT_COMPILE=1
 
 all: imidj
 
-imidj: imidj.o chunker.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LZIP_LDFLAGS) $$(pkg-config --libs glib-2.0) $$(pkg-config libcrypto --libs) $(LZMA_LIBS) $(LZIP_LIBS) $$(pkg-config --libs libcurl)
+imidj: imidj.o analyzer.o chidx.o chunker.o differ.o patcher.o chblo.o compressor.o chidx-digest.o
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LZIP_LDFLAGS) $$(pkg-config --libs glib-2.0) $$(pkg-config libcrypto --libs) $(LZIP_LIBS) $$(pkg-config --libs libcurl)
 
 chunker.o: chunker.c
 	$(CC) $(CFLAGS) -c $< -o $@ 
-
-imidj.o: main.c
-	$(CC) $(CFLAGS) $(LZMA_CFLAGS) $(LZIP_CFLAGS) $$(pkg-config --cflags glib-2.0) $$(pkg-config --cflags libcurl) -c $< -o $@
 
 clean:
 	rm -f *.o imidj
@@ -56,3 +46,30 @@ clean:
 install:
 	install -d -m 0755 $(DESTDIR)/usr/bin
 	install -m 0755 imidj $(DESTDIR)/usr/bin/
+
+
+chblo.o: chblo.c chblo.h chidx.h compressor.h chidx-digest.h
+	$(CC) $(CFLAGS) $$(pkg-config --cflags glib-2.0) -c $< -o $@
+
+chidx-digest.o: chidx-digest.c chidx-digest.h
+	$(CC) $(CFLAGS) $$(pkg-config --cflags glib-2.0) $$(pkg-config libcrypto --cflags) -c $< -o $@
+
+chidx.o: chidx.c chidx.h imidj.h chblo.h chidx-digest.h
+	$(CC) $(CFLAGS) $$(pkg-config --cflags glib-2.0) -c $< -o $@
+
+analyzer.o: analyzer.c analyzer.h imidj.h chidx.h chidx-digest.h
+	$(CC) $(CFLAGS) $$(pkg-config --cflags glib-2.0) -c $< -o $@
+
+imidj.o: imidj.c imidj.h chidx.h analyzer.h differ.h
+	$(CC) $(CFLAGS) $$(pkg-config --cflags glib-2.0) -c $< -o $@
+
+differ.o: differ.c differ.h imidj.h chidx.h chidx-digest.h
+	$(CC) $(CFLAGS) $$(pkg-config --cflags glib-2.0) -c $< -o $@
+
+patcher.o: patcher.c patcher.h imidj.h chidx.h compressor.h chidx-digest.h
+	$(CC) $(CFLAGS) $$(pkg-config --cflags glib-2.0) $$(pkg-config --cflags libcurl) -c $< -o $@
+compressor.o: compressor.c compressor.h 
+	$(CC) $(CFLAGS) $$(pkg-config --cflags glib-2.0) $(LZIP_CFLAGS) -c $< -o $@
+
+
+
