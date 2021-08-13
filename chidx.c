@@ -286,9 +286,6 @@ static int write_chunkindex_header(int fd, uint8_t * filehash) {
     hdr.chunkhash_len       = g_htons(hashsize_from_hashtype(hdr.chunkhash_type));
     memset(hdr.reserved, 0x0, sizeof(hdr.reserved));
 
-    g_printerr("DBG: chidx_hdr_t has size: %ld\n", sizeof(chidx_hdr_t) );
-    g_printerr("DBG: chidx_hdr_t.reserved has size: %ld\n", sizeof(hdr.reserved) );
-
     if (write(fd, &hdr, sizeof(chidx_hdr_t)) <= 0) {
         g_printerr("error while trying to write chunk index file header: %s", g_strerror(errno));
         exit(40);
