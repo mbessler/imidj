@@ -480,7 +480,7 @@ static int patcher_main(int num_reference_images)
             {
                 uint8_t buf[target_record->l];
                 lseek(tfd, target_record->offset, SEEK_SET);
-                if( read(tfd, &buf, target_record->l) != target_record->l ) {
+                if( (uint32_t)read(tfd, &buf, target_record->l) != target_record->l ) {
                     g_printerr("error during read-back of written, decompressed new chunk: %s\n", g_strerror(errno));
                     exit(200);
                 }
