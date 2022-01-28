@@ -364,7 +364,7 @@ static int write_chunkindex_header(int fd, uint8_t * filehash) {
                 g_hash_table_insert(chunk_refcnt_table, gb_key, val);
             }
         }
-        g_print("%s\n", hexdigest);
+        if(opt_verbose) { g_print("%s\n", hexdigest); }
         g_free(hexdigest);
 
         record->num = i;
@@ -482,7 +482,7 @@ static int indexer_main(void)
         long * val = (long *)value;
         total_chunks += (*val);
         unique_chunks += 1;
-        g_print("total chunks now: %d   unique now %d\n", total_chunks, unique_chunks);
+        if(opt_verbose) { g_print("total chunks now: %d   unique now %d\n", total_chunks, unique_chunks); }
     }
     g_print("chunks total: %d  unique: %d\n", total_chunks, unique_chunks);
 

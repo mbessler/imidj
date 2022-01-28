@@ -310,7 +310,7 @@ static int patcher_main(int num_reference_images)
             if (target_record->offset == target_asis_record->offset &&
                 memcmp(target_record->chunkhash, target_asis_record->chunkhash, chunk_digest_length) == 0) {
                 gchar * hexdigest = hexlify_digest(DEFAULT_CHUNK_HASH, target_record->chunkhash);
-                g_print("chunk #%d with checksum %s already correct in target image\n", i, hexdigest);
+                if(opt_verbose) { g_print("chunk #%d with checksum %s already correct in target image\n", i, hexdigest); }
                 g_free(hexdigest);
 
                 patch_stats.bytes_already_present += target_record->l;
@@ -367,7 +367,7 @@ static int patcher_main(int num_reference_images)
                     g_free(chunk_data);
                     chunk_found_in_ref = TRUE;
                     gchar * hexdigest = hexlify_digest(DEFAULT_CHUNK_HASH, target_record->chunkhash);
-                    g_print("retrieving chunk #%d with checksum %s from reference image '%s'\n", i, hexdigest, patcher_reference_image_array[r]);
+                    if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from reference image '%s'\n", i, hexdigest, patcher_reference_image_array[r]); }
                     g_free(hexdigest);
 
                     /* update stats */
@@ -390,7 +390,7 @@ static int patcher_main(int num_reference_images)
         if(url_is_local) {
             int chblo_fd = -1;
             gchar * chblo_path = g_strdup_printf("%s/chunks/%02x/%s.chblo" CHUNK_EXT, patcher_url, target_record->chunkhash[0], hexdigest);
-            g_print("retrieving chunk #%d with checksum %s from local file '%s'\n", i, hexdigest, chblo_path);
+            if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from local file '%s'\n", i, hexdigest, chblo_path); }
             if ((chblo_fd = open(chblo_path, O_RDONLY)) < 0) {
                 g_printerr("could not open chblo '%s': %s\n", chblo_path, g_strerror(errno));
                 exit(70);
@@ -413,7 +413,7 @@ static int patcher_main(int num_reference_images)
             curl_easy_setopt(ceh, CURLOPT_TIMEOUT_MS, patcher_dl_requesttimeout_ms);
             curl_easy_setopt(ceh, CURLOPT_CONNECTTIMEOUT_MS, patcher_dl_connecttimeout_ms);
 
-            g_print("retrieving chunk #%d with checksum %s from remote URL '%s'\n", i, hexdigest, chblo_url);
+            if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from remote URL '%s'\n", i, hexdigest, chblo_url); }
             CURLcode res = curl_easy_setopt(ceh, CURLOPT_URL, chblo_url);
             if (res != CURLE_OK) {
                 g_printerr("curl set url failed ret=%d\n", res);
@@ -487,7 +487,7 @@ static int patcher_main(int num_reference_images)
 
                 uint8_t * digest2 = calculate_digest(DEFAULT_CHUNK_HASH, buf, target_record->l);
                 gchar * hexdigest2 = hexlify_digest(DEFAULT_CHUNK_HASH, digest2);
-                g_print("Chunk #%d written, checksum after write: %s\n", i, hexdigest2);
+                if(opt_verbose) { g_print("Chunk #%d written, checksum after write: %s\n", i, hexdigest2); }
                 g_free(hexdigest2);
                 g_free(digest2);
             }
