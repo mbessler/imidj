@@ -421,6 +421,7 @@ static int patcher_main(int num_reference_images)
             }
 
             gint retries;
+            patcher_dl_retry_count_chunk += 1; /* add initial attempt to retries */
             for(retries=0; retries < patcher_dl_retry_count_chunk; retries++) {
                 cerrbuf[0] = 0;
                 res = curl_easy_perform(ceh);
