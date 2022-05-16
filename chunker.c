@@ -82,7 +82,8 @@ Chunker * chunker_init(int window_size, int chunk_mask, int min_size, uint32_t s
     c->chunk_mask = chunk_mask;
     c->min_size = min_size;
     c->table = buzhash_init_table(seed);
-    c->buf_size = 10 * 1024 * 1024;
+    //c->buf_size = 10 * 1024 * 1024;
+    c->buf_size = 1 * 1024 * 1024;
     c->data = malloc(c->buf_size);
     return c;
 }
