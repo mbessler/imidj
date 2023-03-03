@@ -27,6 +27,8 @@ typedef struct {
 
     unsigned int chunks_already_present;
     size_t bytes_already_present;
+
+    size_t total_retries;
 } imidj_patch_stats_t;
 
 int patcher_args(int argc, char ** argv);

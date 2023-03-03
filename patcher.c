@@ -73,7 +73,9 @@ imidj_patch_stats_t patch_stats = {
     .bytes_fetched_actual = 0,
     .bytes_local = 0,
     .chunks_already_present = 0,
-    .bytes_already_present = 0 };
+    .bytes_already_present = 0,
+    .total_retries = 0
+};
 
 GOptionEntry patcher_entries[] = {
     /* imidj patch --force-overwrite --stats-out STATSFILE --url URL -r img1.chidx -R img1.img -r img2.chidx -R img2.img IMAGE INDEX */
@@ -159,7 +161,8 @@ static void patcher_stats_to_json(void)
                      "    \"bytes_fetched_actual\": %zd,"    \
                      "    \"bytes_local\": %zd,"             \
                      "    \"chunks_already_present\": %d,"  \
-                     "    \"bytes_already_present\": %zd"  \
+                     "    \"bytes_already_present\": %zd,"  \
+                     "    \"total_retries\": %zd"  \
                      "}",
              patch_stats.chunks_fetched,
              patch_stats.chunks_local,
@@ -167,7 +170,8 @@ static void patcher_stats_to_json(void)
              patch_stats.bytes_fetched_actual,
              patch_stats.bytes_local,
              patch_stats.chunks_already_present,
-             patch_stats.bytes_already_present );
+             patch_stats.bytes_already_present,
+             patch_stats.total_retries);
     if (write(fd, s ,l) < 0) {
         g_printerr("Cannot write to json stats file '%s': %s\n", patcher_stats_out, g_strerror(errno));
         close(fd);
@@ -433,11 +437,13 @@ static int patcher_main(int num_reference_images)
                 if (res == CURLE_FTP_ACCEPT_TIMEOUT || res == CURLE_OPERATION_TIMEDOUT) {
                     g_printerr("curl operation timeout, sleeping for %d ms before retry #%d\n", patcher_dl_timeout_sleep_ms, retries+1);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
+                    patch_stats.total_retries += 1;
                     continue;
                 }
                 if (res == CURLE_HTTP_RETURNED_ERROR ) {
                     g_printerr("curl http error, sleeping for %d ms before retry #%d\n", patcher_dl_timeout_sleep_ms, retries+1);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
+                    patch_stats.total_retries += 1;
                     continue;
                 } else if (res == CURLE_COULDNT_RESOLVE_PROXY
                     || res == CURLE_COULDNT_RESOLVE_HOST
@@ -454,6 +460,7 @@ static int patcher_main(int num_reference_images)
                     ) {
                     g_printerr("curl operation timeout, sleeping for %d ms before retry #%d\n", patcher_dl_timeout_sleep_ms, retries+1);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
+                    patch_stats.total_retries += 1;
                     continue;
                 }
                 break; /* all other errors */
