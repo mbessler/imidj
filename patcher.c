@@ -58,6 +58,7 @@ static glong patcher_dl_requesttimeout_ms = PATCHER_DL_REQUESTTIMEOUT_MS_DEFAULT
 static gboolean patcher_force_overwrite = FALSE;
 static gboolean patcher_skip_mismatched_refs = FALSE;
 static gboolean patcher_skip_verify = FALSE;
+static gboolean patcher_ssl_noverify = FALSE;
 static gchar** patcher_reference_index_array = NULL;
 static gchar** patcher_reference_image_array = NULL;
 static gchar* patcher_stats_out = NULL;
@@ -90,6 +91,7 @@ GOptionEntry patcher_entries[] = {
     {"reference-image", 'R', 0, G_OPTION_ARG_FILENAME_ARRAY, &patcher_reference_image_array, "Existing image file as reference (requires matching '-r'; can be specified zero or more times) ", "IMAGEFILE"},
     {"skip-mismatched-references", '\0', 0, G_OPTION_ARG_NONE, &patcher_skip_mismatched_refs, "Skip if a reference image mismatches its chunk index (instead of exit w/ error)", NULL},
     {"skip-verify", '\0',  0, G_OPTION_ARG_NONE, &patcher_skip_verify, "Skip image checksum verification checksum after (re)building from chunks. (Saves a bit of time but won't catch corrupted files.)", NULL},
+    {"ssl-noverify", '\0', 0, G_OPTION_ARG_NONE, &patcher_ssl_noverify, "Ignore SSL peer certificates", NULL},
     {"dl-num-retries", '\0',  0, G_OPTION_ARG_INT, &patcher_dl_retry_count_chunk, "Number of retries for failed chunk downloads (default: " STRINGIFY(PATCHER_DL_RETRY_COUNT_DEFAULT) ")", "N"},
     {"dl-sleep-before-retry", '\0',  0, G_OPTION_ARG_INT, &patcher_dl_timeout_sleep_ms, "Number of milliseconds to sleep before retrying chunk download after a timeout (default: " STRINGIFY(PATCHER_DL_RETRY_TIMEOUT_SLEEP_MS_DEFAULT) ")", "MS"},
     {"dl-connecttimeout", '\0', 0, G_OPTION_ARG_INT, &patcher_dl_connecttimeout_ms, "Number of milliseconds after which a connect attempt is allwed to take before retrying (default: " STRINGIFY(PATCHER_DL_CONNECTTIMEOUT_MS_DEFAULT) ")", "MS"},
@@ -416,6 +418,10 @@ static int patcher_main(int num_reference_images)
             curl_easy_setopt(ceh, CURLOPT_FAILONERROR, 1L);
             curl_easy_setopt(ceh, CURLOPT_TIMEOUT_MS, patcher_dl_requesttimeout_ms);
             curl_easy_setopt(ceh, CURLOPT_CONNECTTIMEOUT_MS, patcher_dl_connecttimeout_ms);
+            if (patcher_ssl_noverify) {
+                curl_easy_setopt(ceh, CURLOPT_SSL_VERIFYPEER, 0L);
+                if(opt_verbose) { g_print("Disabled SSL certificate verification\n"); }
+            }
 
             if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from remote URL '%s'\n", i, hexdigest, chblo_url); }
             CURLcode res = curl_easy_setopt(ceh, CURLOPT_URL, chblo_url);
