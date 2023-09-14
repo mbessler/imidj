@@ -418,6 +418,9 @@ static int patcher_main(int num_reference_images)
             curl_easy_setopt(ceh, CURLOPT_FAILONERROR, 1L);
             curl_easy_setopt(ceh, CURLOPT_TIMEOUT_MS, patcher_dl_requesttimeout_ms);
             curl_easy_setopt(ceh, CURLOPT_CONNECTTIMEOUT_MS, patcher_dl_connecttimeout_ms);
+            curl_easy_setopt(ceh, CURLOPT_FOLLOWLOCATION, 1L);
+            curl_easy_setopt(ceh, CURLOPT_MAXREDIRS, 8L);
+
             if (patcher_ssl_noverify) {
                 curl_easy_setopt(ceh, CURLOPT_SSL_VERIFYPEER, 0L);
                 if(opt_verbose) { g_print("Disabled SSL certificate verification\n"); }
