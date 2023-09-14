@@ -420,6 +420,7 @@ static int patcher_main(int num_reference_images)
             curl_easy_setopt(ceh, CURLOPT_CONNECTTIMEOUT_MS, patcher_dl_connecttimeout_ms);
             curl_easy_setopt(ceh, CURLOPT_FOLLOWLOCATION, 1L);
             curl_easy_setopt(ceh, CURLOPT_MAXREDIRS, 8L);
+            curl_easy_setopt(ceh, CURLOPT_MAXFILESIZE_LARGE, (curl_off_t)32*1024*1024L); /* 32MiB */
 
             if (patcher_ssl_noverify) {
                 curl_easy_setopt(ceh, CURLOPT_SSL_VERIFYPEER, 0L);
