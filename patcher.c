@@ -445,13 +445,13 @@ static int patcher_main(int num_reference_images)
                 }
                 /* retry immediately on some curl errors, sleep for a while and retry on timeout errors, and fail immediatly on all others */
                 if (res == CURLE_FTP_ACCEPT_TIMEOUT || res == CURLE_OPERATION_TIMEDOUT) {
-                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d\n", patcher_dl_timeout_sleep_ms, retries+1);
+                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, i, chblo_url);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     patch_stats.total_retries += 1;
                     continue;
                 }
                 if (res == CURLE_HTTP_RETURNED_ERROR ) {
-                    g_printerr("curl http error, sleeping for %d ms before retry #%d\n", patcher_dl_timeout_sleep_ms, retries+1);
+                    g_printerr("curl http error, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, i, chblo_url);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     patch_stats.total_retries += 1;
                     continue;
@@ -468,7 +468,7 @@ static int patcher_main(int num_reference_images)
                     || res == CURLE_RECV_ERROR
                     || res == CURLE_SSH
                     ) {
-                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d\n", patcher_dl_timeout_sleep_ms, retries+1);
+                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, i, chblo_url);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     patch_stats.total_retries += 1;
                     continue;
@@ -478,15 +478,15 @@ static int patcher_main(int num_reference_images)
             if (res != CURLE_OK) {
                 size_t len = strlen(cerrbuf);
                 if(len) {
-                    g_printerr("Could not fetch remote chunk block after %d tries ret=%d. %s\n", retries, res, cerrbuf);
+                    g_printerr("Could not fetch remote chunk block (chunk #%d url %s) after %d tries ret=%d. %s\n", i, chblo_url, retries, res, cerrbuf);
                 } else {
-                    g_printerr("Could not fetch remote chunk block after %d tries ret=%d. %s\n", retries, res, curl_easy_strerror(res));
+                    g_printerr("Could not fetch remote chunk block (chunk #%d url %s) after %d tries ret=%d. %s\n", i, chblo_url, retries, res, curl_easy_strerror(res));
                 }
                 exit(72);
             }
 
             if (lseek(tempfd, 0, SEEK_SET) < 0) {
-                g_printerr("Cannot seek downloaded chunk file '%s': %s\n", tmpfilename, g_strerror(errno));
+                g_printerr("Cannot seek downloaded chunk file '%s' (chunk #%d): %s\n", tmpfilename, i, g_strerror(errno));
                 exit(74);
             }
             //g_print("decompressing chunk %d in %s ...", i, tmpfilename);
@@ -499,7 +499,7 @@ static int patcher_main(int num_reference_images)
                 uint8_t buf[target_record->l];
                 lseek(tfd, target_record->offset, SEEK_SET);
                 if( (uint32_t)read(tfd, &buf, target_record->l) != target_record->l ) {
-                    g_printerr("error during read-back of written, decompressed new chunk: %s\n", g_strerror(errno));
+                    g_printerr("error during read-back of written, decompressed new chunk (chunk #%d): %s\n", i, g_strerror(errno));
                     exit(200);
                 }
 
