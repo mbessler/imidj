@@ -299,6 +299,7 @@ static int patcher_main(int num_reference_images)
         exit(68);
     }
 
+    patcher_dl_retry_count_chunk += 1; /* ensure there is at least one (initial) retry attempt */
     ssize_t chunk_digest_length = hashsize_from_hashtype(DEFAULT_CHUNK_HASH);
     off_t imglen = 0;
     for (unsigned int i = 0; i < target_chunk_list->len; i++)
@@ -435,7 +436,6 @@ static int patcher_main(int num_reference_images)
             }
 
             gint retries;
-            patcher_dl_retry_count_chunk += 1; /* add initial attempt to retries */
             for(retries=0; retries < patcher_dl_retry_count_chunk; retries++) {
                 cerrbuf[0] = 0;
                 res = curl_easy_perform(ceh);
