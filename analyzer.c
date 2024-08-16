@@ -139,7 +139,7 @@ static int analyzer_main(void)
         }
         g_print("Image File Checksum: %s\n", hexdigest);
         free(hexdigest);
-        g_print("Image File Size: %ld\n", imglen);
+        g_print("Image File Size: %jd\n", imglen);
     }
 
     if (analyzer_dump_chunksums) {
@@ -152,7 +152,7 @@ static int analyzer_main(void)
                 g_printerr("memory allocation failed (at %s:%d): %s\n", __FILE__, __LINE__, g_strerror(errno));
                 exit(9);
             }
-            g_print("Chunk #%d offset=0x%08lx size=%d chunksum=%s\n", i, offset, record->l, hexdigest);
+            g_print("Chunk #%d offset=0x%08jx size=%d chunksum=%s\n", i, offset, record->l, hexdigest);
             free(hexdigest);
             offset +=record->l;
         }
