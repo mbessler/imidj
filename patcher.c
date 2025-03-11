@@ -444,18 +444,19 @@ static int patcher_main(int num_reference_images)
                     break;
                 }
                 /* retry immediately on some curl errors, sleep for a while and retry on timeout errors, and fail immediatly on all others */
-                if (res == CURLE_FTP_ACCEPT_TIMEOUT || res == CURLE_OPERATION_TIMEDOUT) {
+                else if (res == CURLE_FTP_ACCEPT_TIMEOUT || res == CURLE_OPERATION_TIMEDOUT) {
                     g_printerr("curl operation timeout, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, chunknum, chblo_url);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     patch_stats.total_retries += 1;
                     continue;
                 }
-                if (res == CURLE_HTTP_RETURNED_ERROR ) {
+                else if (res == CURLE_HTTP_RETURNED_ERROR ) {
                     g_printerr("curl http error, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, chunknum, chblo_url);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     patch_stats.total_retries += 1;
                     continue;
-                } else if (res == CURLE_COULDNT_RESOLVE_PROXY
+                }
+                else if (res == CURLE_COULDNT_RESOLVE_PROXY
                     || res == CURLE_COULDNT_RESOLVE_HOST
                     || res == CURLE_COULDNT_CONNECT
                     || res == CURLE_FTP_ACCEPT_FAILED
@@ -473,6 +474,7 @@ static int patcher_main(int num_reference_images)
                     patch_stats.total_retries += 1;
                     continue;
                 }
+                g_printerr("curl returned error code %d attempting to download chunk#%d url %s\n", res, chunknum, chblo_url);
                 break; /* all other errors */
             }
             if (res != CURLE_OK) {
