@@ -302,13 +302,13 @@ static int patcher_main(int num_reference_images)
     patcher_dl_retry_count_chunk += 1; /* ensure there is at least one (initial) retry attempt */
     ssize_t chunk_digest_length = hashsize_from_hashtype(DEFAULT_CHUNK_HASH);
     off_t imglen = 0;
-    for (unsigned int i = 0; i < target_chunk_list->len; i++)
+    for (unsigned int chunknum = 0; chunknum < target_chunk_list->len; chunknum++)
     {
-        chidx_chunk_record_t * target_record = g_ptr_array_index(target_chunk_list, i);
+        chidx_chunk_record_t * target_record = g_ptr_array_index(target_chunk_list, chunknum);
         imglen += target_record->l;
         /* first check if chunk is already in place, if: target_image_exists && ! patcher_force_overwrite and make sure we're not running over the end of asis list */
-        if (target_image_exists && ! patcher_force_overwrite && target_asis_chunk_list->len > i) {
-            chidx_chunk_record_t * target_asis_record = g_ptr_array_index(target_asis_chunk_list, i);
+        if (target_image_exists && ! patcher_force_overwrite && target_asis_chunk_list->len > chunknum) {
+            chidx_chunk_record_t * target_asis_record = g_ptr_array_index(target_asis_chunk_list, chunknum);
             /* not only compare the chunks here, but also the offset since things might have shifted.
              * In that case, just depend on other sources for this block instead of trying to copy since
              * it was most likely already overwritten by a previous chunk.
@@ -317,7 +317,7 @@ static int patcher_main(int num_reference_images)
             if (target_record->offset == target_asis_record->offset &&
                 memcmp(target_record->chunkhash, target_asis_record->chunkhash, chunk_digest_length) == 0) {
                 gchar * hexdigest = hexlify_digest(DEFAULT_CHUNK_HASH, target_record->chunkhash);
-                if(opt_verbose) { g_print("chunk #%d with checksum %s already correct in target image\n", i, hexdigest); }
+                if(opt_verbose) { g_print("chunk #%d with checksum %s already correct in target image\n", chunknum, hexdigest); }
                 g_free(hexdigest);
 
                 patch_stats.bytes_already_present += target_record->l;
@@ -334,21 +334,21 @@ static int patcher_main(int num_reference_images)
 
         gboolean chunk_found_in_ref = FALSE;
         /* next, check if the chunk exists in a local reference image */
-        for(int r=0; r<num_reference_images; r++) {
+        for(int refimg=0; refimg<num_reference_images; refimg++) {
             /* skip reference image if its fd is -1 */
-            if (reference_image_fds[r] < 0) {
+            if (reference_image_fds[refimg] < 0) {
                 continue;
             }
             /* skip empty and discarded reference images */
-            if (reference_chunk_list[r] == NULL) {
+            if (reference_chunk_list[refimg] == NULL) {
                 continue;
             }
             /* future optimization: use a hash to look up the index instead of iterating over list  */
-            for (unsigned int x = 0; x < reference_chunk_list[r]->len; x++) {
-                chidx_chunk_record_t * reference_record = g_ptr_array_index(reference_chunk_list[r], x);
+            for (unsigned int x = 0; x < reference_chunk_list[refimg]->len; x++) {
+                chidx_chunk_record_t * reference_record = g_ptr_array_index(reference_chunk_list[refimg], x);
                 if(memcmp(target_record->chunkhash, reference_record->chunkhash, chunk_digest_length) == 0) {
                     /* seek in reference image, read from reference, and insert chunk into target image */
-                    if (lseek(reference_image_fds[r], reference_record->offset, SEEK_SET) < 0) {
+                    if (lseek(reference_image_fds[refimg], reference_record->offset, SEEK_SET) < 0) {
                         g_printerr("Cannot seek reference image file '%s': %s\n", target_image_path, g_strerror(errno));
                         continue;
                     }
@@ -358,9 +358,9 @@ static int patcher_main(int num_reference_images)
                         g_printerr("memory allocation error at %s:%d\n", __FILE__, __LINE__);
                         exit(9);
                     }
-                    ssize_t num_read = read(reference_image_fds[r], chunk_data, l);
+                    ssize_t num_read = read(reference_image_fds[refimg], chunk_data, l);
                     if (num_read < 0) {
-                        g_printerr("read error while trying to extract chunk from reference image '%s': %s\n", patcher_reference_image_array[r], g_strerror(errno));
+                        g_printerr("read error while trying to extract chunk from reference image '%s': %s\n", patcher_reference_image_array[refimg], g_strerror(errno));
                         continue;
                     }
                     ssize_t num_written = write(tfd, chunk_data, l);
@@ -374,7 +374,7 @@ static int patcher_main(int num_reference_images)
                     g_free(chunk_data);
                     chunk_found_in_ref = TRUE;
                     gchar * hexdigest = hexlify_digest(DEFAULT_CHUNK_HASH, target_record->chunkhash);
-                    if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from reference image '%s'\n", i, hexdigest, patcher_reference_image_array[r]); }
+                    if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from reference image '%s'\n", chunknum, hexdigest, patcher_reference_image_array[refimg]); }
                     g_free(hexdigest);
 
                     /* update stats */
@@ -397,7 +397,7 @@ static int patcher_main(int num_reference_images)
         if(url_is_local) {
             int chblo_fd = -1;
             gchar * chblo_path = g_strdup_printf("%s/chunks/%02x/%s.chblo" CHUNK_EXT, patcher_url, target_record->chunkhash[0], hexdigest);
-            if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from local file '%s'\n", i, hexdigest, chblo_path); }
+            if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from local file '%s'\n", chunknum, hexdigest, chblo_path); }
             if ((chblo_fd = open(chblo_path, O_RDONLY)) < 0) {
                 g_printerr("could not open chblo '%s': %s\n", chblo_path, g_strerror(errno));
                 exit(70);
@@ -428,7 +428,7 @@ static int patcher_main(int num_reference_images)
                 if(opt_verbose) { g_print("Disabled SSL certificate verification\n"); }
             }
 
-            if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from remote URL '%s'\n", i, hexdigest, chblo_url); }
+            if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from remote URL '%s'\n", chunknum, hexdigest, chblo_url); }
             CURLcode res = curl_easy_setopt(ceh, CURLOPT_URL, chblo_url);
             if (res != CURLE_OK) {
                 g_printerr("curl set url failed ret=%d\n", res);
@@ -445,13 +445,13 @@ static int patcher_main(int num_reference_images)
                 }
                 /* retry immediately on some curl errors, sleep for a while and retry on timeout errors, and fail immediatly on all others */
                 if (res == CURLE_FTP_ACCEPT_TIMEOUT || res == CURLE_OPERATION_TIMEDOUT) {
-                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, i, chblo_url);
+                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, chunknum, chblo_url);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     patch_stats.total_retries += 1;
                     continue;
                 }
                 if (res == CURLE_HTTP_RETURNED_ERROR ) {
-                    g_printerr("curl http error, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, i, chblo_url);
+                    g_printerr("curl http error, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, chunknum, chblo_url);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     patch_stats.total_retries += 1;
                     continue;
@@ -468,7 +468,7 @@ static int patcher_main(int num_reference_images)
                     || res == CURLE_RECV_ERROR
                     || res == CURLE_SSH
                     ) {
-                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, i, chblo_url);
+                    g_printerr("curl operation timeout, sleeping for %d ms before retry #%d (chunk #%d url %s)\n", patcher_dl_timeout_sleep_ms, retries+1, chunknum, chblo_url);
                     g_usleep(1000 * patcher_dl_timeout_sleep_ms);
                     patch_stats.total_retries += 1;
                     continue;
@@ -478,18 +478,18 @@ static int patcher_main(int num_reference_images)
             if (res != CURLE_OK) {
                 size_t len = strlen(cerrbuf);
                 if(len) {
-                    g_printerr("Could not fetch remote chunk block (chunk #%d url %s) after %d tries ret=%d. %s\n", i, chblo_url, retries, res, cerrbuf);
+                    g_printerr("Could not fetch remote chunk block (chunk #%d url %s) after %d tries ret=%d. %s\n", chunknum, chblo_url, retries, res, cerrbuf);
                 } else {
-                    g_printerr("Could not fetch remote chunk block (chunk #%d url %s) after %d tries ret=%d. %s\n", i, chblo_url, retries, res, curl_easy_strerror(res));
+                    g_printerr("Could not fetch remote chunk block (chunk #%d url %s) after %d tries ret=%d. %s\n", chunknum, chblo_url, retries, res, curl_easy_strerror(res));
                 }
                 exit(72);
             }
 
             if (lseek(tempfd, 0, SEEK_SET) < 0) {
-                g_printerr("Cannot seek downloaded chunk file '%s' (chunk #%d): %s\n", tmpfilename, i, g_strerror(errno));
+                g_printerr("Cannot seek downloaded chunk file '%s' (chunk #%d): %s\n", tmpfilename, chunknum, g_strerror(errno));
                 exit(74);
             }
-            //g_print("decompressing chunk %d in %s ...", i, tmpfilename);
+            //g_print("decompressing chunk %d in %s ...", chunknum, tmpfilename);
             lzip_decompress(tempfd, tfd, &chunk_compressed_size);
 
 
@@ -499,13 +499,13 @@ static int patcher_main(int num_reference_images)
                 uint8_t buf[target_record->l];
                 lseek(tfd, target_record->offset, SEEK_SET);
                 if( (uint32_t)read(tfd, &buf, target_record->l) != target_record->l ) {
-                    g_printerr("error during read-back of written, decompressed new chunk (chunk #%d): %s\n", i, g_strerror(errno));
+                    g_printerr("error during read-back of written, decompressed new chunk (chunk #%d): %s\n", chunknum, g_strerror(errno));
                     exit(200);
                 }
 
                 uint8_t * digest2 = calculate_digest(DEFAULT_CHUNK_HASH, buf, target_record->l);
                 gchar * hexdigest2 = hexlify_digest(DEFAULT_CHUNK_HASH, digest2);
-                if(opt_verbose) { g_print("Chunk #%d written, checksum after write: %s\n", i, hexdigest2); }
+                if(opt_verbose) { g_print("Chunk #%d written, checksum after write: %s\n", chunknum, hexdigest2); }
                 g_free(hexdigest2);
                 g_free(digest2);
             }
