@@ -50,6 +50,11 @@ gboolean lzip_decompress(int infd, int outfd, int * ret_compressed_size) {
     do {
         const int max_in_size = MIN(LZ_decompress_write_size(decoder), buffer_size);
         ssize_t num_read_compr = 0;
+        if( max_in_size < 0 ) {
+            int lzerr = LZ_decompress_errno(decoder);
+            g_printerr("lzip decompression failure: code: %d message: %s\n", lzerr, LZ_strerror(lzerr));
+            return FALSE; /* allow retry download and decompress by caller if desired */
+        }
         if( max_in_size > 0 ) {
             num_read_compr = read(infd, inbuf, max_in_size);
             if (num_read_compr == 0) {
@@ -59,7 +64,8 @@ gboolean lzip_decompress(int infd, int outfd, int * ret_compressed_size) {
                 exit(56);
             }
             if( num_read_compr != LZ_decompress_write(decoder, inbuf, num_read_compr) ) {
-                g_printerr("lzip decompression write failure\n");
+                int lzerr = LZ_decompress_errno(decoder);
+                g_printerr("lzip decompression write failure: code: %d message: %s\n", lzerr, LZ_strerror(lzerr));
                 exit(56);
             }
             if (ret_compressed_size) {
@@ -85,6 +91,10 @@ gboolean lzip_decompress(int infd, int outfd, int * ret_compressed_size) {
                 decompressed_size += num_written;
             }
             else if( decompr_size <= 0 ) {
+                if(decompr_size < 0) {
+                    int lzerr = LZ_decompress_errno(decoder);
+                    g_printerr("lzip decompression read failure: code: %d message: %s\n", lzerr, LZ_strerror(lzerr));
+                }
                 break;
             }
         }
