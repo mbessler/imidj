@@ -361,6 +361,7 @@ static int patcher_main(int num_reference_images)
                     ssize_t num_read = read(reference_image_fds[refimg], chunk_data, l);
                     if (num_read < 0) {
                         g_printerr("read error while trying to extract chunk from reference image '%s': %s\n", patcher_reference_image_array[refimg], g_strerror(errno));
+                        g_free(chunk_data);
                         continue;
                     }
                     ssize_t num_written = write(tfd, chunk_data, l);
