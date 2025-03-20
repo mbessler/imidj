@@ -197,8 +197,14 @@ static int patcher_main(int num_reference_images)
         g_printerr("libcurl easy init failed\n");
         exit(81);
     }
-    curl_easy_setopt(ceh, CURLOPT_WRITEFUNCTION, receive_data_from_curl);
-    curl_easy_setopt(ceh, CURLOPT_ERRORBUFFER, cerrbuf);
+    CURLcode res = curl_easy_setopt(ceh, CURLOPT_WRITEFUNCTION, receive_data_from_curl);
+    if (res != CURLE_OK) {
+        g_printerr("curl setopt failed for CURLOPT_WRITEFUNCTIO ret=%d\n", res);
+    }
+    res = curl_easy_setopt(ceh, CURLOPT_ERRORBUFFER, cerrbuf);
+    if (res != CURLE_OK) {
+        g_printerr("curl setopt failed for CURLOPT_ERRORBUFFER ret=%d\n", res);
+    }
 
     g_print("patching image '%s' (index: '%s')\n", patcher_out_img, patcher_index_file);
 
@@ -422,21 +428,45 @@ static int patcher_main(int num_reference_images)
                 gchar * chblo_url = g_strdup_printf("%s/chunks/%02x/%s.chblo" CHUNK_EXT, patcher_url, target_record->chunkhash[0], hexdigest);
                 int tempfd = g_mkstemp(tmpfilename);
                 unlink(tmpfilename);
-                curl_easy_setopt(ceh, CURLOPT_WRITEDATA, &tempfd);
-                curl_easy_setopt(ceh, CURLOPT_FAILONERROR, 1L);
-                curl_easy_setopt(ceh, CURLOPT_TIMEOUT_MS, patcher_dl_requesttimeout_ms);
-                curl_easy_setopt(ceh, CURLOPT_CONNECTTIMEOUT_MS, patcher_dl_connecttimeout_ms);
-                curl_easy_setopt(ceh, CURLOPT_FOLLOWLOCATION, 1L);
-                curl_easy_setopt(ceh, CURLOPT_MAXREDIRS, 8L);
-                curl_easy_setopt(ceh, CURLOPT_MAXFILESIZE_LARGE, (curl_off_t)32*1024*1024L); /* 32MiB */
+                res = curl_easy_setopt(ceh, CURLOPT_WRITEDATA, &tempfd);
+                if (res != CURLE_OK) {
+                    g_printerr("curl setopt failed for CURLOPT_WRITEDATA ret=%d\n", res);
+                }
+                res = curl_easy_setopt(ceh, CURLOPT_FAILONERROR, 1L);
+                if (res != CURLE_OK) {
+                    g_printerr("curl setopt failed for CURLOPT_FAILONERROR ret=%d\n", res);
+                }
+                res = curl_easy_setopt(ceh, CURLOPT_TIMEOUT_MS, patcher_dl_requesttimeout_ms);
+                if (res != CURLE_OK) {
+                    g_printerr("curl setopt failed for CURLOPT_TIMEOUT_MS ret=%d\n", res);
+                }
+                res = curl_easy_setopt(ceh, CURLOPT_CONNECTTIMEOUT_MS, patcher_dl_connecttimeout_ms);
+                if (res != CURLE_OK) {
+                    g_printerr("curl setopt failed for CURLOPT_CONNECTTIMEOUT_MS ret=%d\n", res);
+                }
+                res = curl_easy_setopt(ceh, CURLOPT_FOLLOWLOCATION, 1L);
+                if (res != CURLE_OK) {
+                    g_printerr("curl setopt failed for CURLOPT_FOLLOWLOCATION ret=%d\n", res);
+                }
+                res = curl_easy_setopt(ceh, CURLOPT_MAXREDIRS, 8L);
+                if (res != CURLE_OK) {
+                    g_printerr("curl setopt failed for CURLOPT_MAXREDIRS ret=%d\n", res);
+                }
+                res = curl_easy_setopt(ceh, CURLOPT_MAXFILESIZE_LARGE, (curl_off_t)32*1024*1024L); /* 32MiB */
+                if (res != CURLE_OK) {
+                    g_printerr("curl setopt failed for CURLOPT_MAXFILESIZE_LARGE ret=%d\n", res);
+                }
 
                 if (patcher_ssl_noverify) {
-                    curl_easy_setopt(ceh, CURLOPT_SSL_VERIFYPEER, 0L);
+                    res = curl_easy_setopt(ceh, CURLOPT_SSL_VERIFYPEER, 0L);
+                    if (res != CURLE_OK) {
+                        g_printerr("curl setopt failed for CURLOPT_MAXFILESIZE_LARGE ret=%d\n", res);
+                    }
                     if(opt_verbose) { g_print("Disabled SSL certificate verification\n"); }
                 }
 
                 if(opt_verbose) { g_print("retrieving chunk #%d with checksum %s from remote URL '%s'\n", chunknum, hexdigest, chblo_url); }
-                CURLcode res = curl_easy_setopt(ceh, CURLOPT_URL, chblo_url);
+                res = curl_easy_setopt(ceh, CURLOPT_URL, chblo_url);
                 if (res != CURLE_OK) {
                     g_printerr("curl set url failed ret=%d\n", res);
                     exit(71);
