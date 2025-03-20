@@ -120,6 +120,33 @@ static void parse_chidx_hdrv0(int chidx_fd, gchar *chidx_filename, chidx_hdr_t *
 
 static void parse_chidx_hdrv2(int chidx_fd, gchar *chidx_filename, chidx_hdr_t * hdr, chidx_hdr2_t ** hdr2p) {
     // most primary header work has already been done by parse_chidx()
+
+    /* stricter checking of hash types and their lengths -- full file hash */
+    if ( 0 == hashsize_from_hashtype(hdr->fullfilehash_type) ) {
+        /* report unknown hash type */
+        g_printerr("fullfile hash type unknown: %d, trying SHA256\n", hdr->fullfilehash_type);
+        hdr->fullfilehash_type = IMIDJ_HASH_SHA256;
+    }
+
+    if ( hdr->fullfilehash_len != hashsize_from_hashtype(hdr->fullfilehash_type) ) {
+        /* report mismatch */
+        g_printerr("fullfile hash length mismatch, header had %d, but based on type it should be %d\n", hdr->fullfilehash_len, hashsize_from_hashtype(hdr->fullfilehash_type));
+    }
+    hdr->fullfilehash_len  = hashsize_from_hashtype(hdr->fullfilehash_type);
+
+    /* stricter checking of hash types and their lengths -- chunk hash */
+    if ( 0 == hashsize_from_hashtype(hdr->chunkhash_type) ) {
+        /* report unknown hash type */
+        g_printerr("chunk hash type unknown: %d trying MD5\n", hdr->chunkhash_type);
+        hdr->chunkhash_type    = IMIDJ_HASH_MD5;
+    }
+
+    if ( hdr->chunkhash_len != hashsize_from_hashtype(hdr->chunkhash_type) ) {
+        /* report mismatch */
+        g_printerr("chunk hash length mismatch, header had %d, but based on type it should be %d\n", hdr->chunkhash_len, hashsize_from_hashtype(hdr->chunkhash_type));
+     }
+    hdr->chunkhash_len     = hashsize_from_hashtype(hdr->chunkhash_type);
+
     if(opt_verbose) {
         g_print("headerinfo: formatversion=%d winsize=0x%04x chunkmask=0x%04x minchunksize=%d\n"
                 "            filehashtype=%s filehashlen=%d chunkhashtype=%s chunkhashlen=%d",
@@ -192,8 +219,8 @@ gboolean parse_chidx(gchar *chidx_filename, chidx_hdr_t * hdr, chidx_hdr2_t ** h
     hdr->winsize          = g_ntohl(hdr->winsize);
     hdr->chunkmask        = g_ntohl(hdr->chunkmask);
     hdr->minchunksize     = g_ntohl(hdr->minchunksize);
-    hdr->fullfilehash_len = g_ntohs(hdr->fullfilehash_len);
-    hdr->chunkhash_len    = g_ntohs(hdr->chunkhash_len);
+    hdr->fullfilehash_len = g_ntohs(MIN(hdr->fullfilehash_len, hashsize_largest()) /* CID-1593966 */);
+    hdr->chunkhash_len    = g_ntohs(MIN(hdr->chunkhash_len, hashsize_largest()) /* CID-1593966 */);
 
     /* determine chidx file format version before accessing more fields */
     switch(hdr->formatversion) {
@@ -231,7 +258,9 @@ gboolean parse_chidx(gchar *chidx_filename, chidx_hdr_t * hdr, chidx_hdr2_t ** h
     while(1) {
         /* the chunk hash type in hdr->chunkhash_type determines the format & size */
         ssize_t record_read_size = sizeof(chidx_chunk_file_record_t) + hdr->chunkhash_len;
+        /* coverity[tainted_data : SUPPRESS] */
         chidx_chunk_file_record_t * filerecord = g_malloc(record_read_size); // has a flexible array member
+        /* coverity[tainted_data : SUPPRESS] */
         chidx_chunk_record_t * record = g_malloc(sizeof(chidx_chunk_record_t) + hdr->chunkhash_len); // has a flexible array member
 
         record->num = i;
@@ -252,6 +281,7 @@ gboolean parse_chidx(gchar *chidx_filename, chidx_hdr_t * hdr, chidx_hdr2_t ** h
             exit(15);
         }
         record->l = g_ntohl(filerecord->l);
+        /* coverity[tainted_data : SUPPRESS] */
         memcpy(record->chunkhash, filerecord->chunkhash, hdr->chunkhash_len);
         if (opt_verbose) {
             char * hexdigest = hexlify_digest(hdr->chunkhash_type, record->chunkhash);

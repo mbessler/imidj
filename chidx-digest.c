@@ -47,6 +47,10 @@ uint16_t hashsize_from_hashtype(hash_type_t htype) {
     }
 }
 
+uint16_t hashsize_largest(void) { /* return the largest sized hash type supported */
+    return hashsize_from_hashtype(IMIDJ_HASH_SHA256);
+}
+
 const gchar * hashname_from_hashtype(hash_type_t htype) {
     switch (htype) {
     case IMIDJ_HASH_SHA256:

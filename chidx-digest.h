@@ -31,6 +31,7 @@ typedef enum {
 
 const gchar * hashname_from_hashtype(hash_type_t htype);
 uint16_t hashsize_from_hashtype(hash_type_t htype);
+uint16_t hashsize_largest(void);
 gchar * hexlify_digest(hash_type_t htype, uint8_t digest[]);
 uint8_t * calculate_digest(hash_type_t htype, uint8_t * data, ssize_t len);
 uint8_t * calculate_digest_file(hash_type_t htype, char * filename);
