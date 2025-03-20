@@ -69,7 +69,7 @@ gchar * hexlify_digest(hash_type_t htype, uint8_t digest[]) {
     for(int i = 0; i < hs; i++) {
         gchar hexdigit[3];
         g_snprintf(hexdigit, 3, "%02x", digest[i]);
-        g_strlcat(hexdigest, hexdigit, hs*2+1);
+        (void)g_strlcat(hexdigest, hexdigit, hs*2+1);
     }
     return(hexdigest);
 }
