@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.com/mbessler/imidj.svg?branch=master)](https://travis-ci.com/mbessler/imidj)
+[![Build Status](https://app.travis-ci.com/mbessler/imidj.svg?branch=master)](https://app.travis-ci.com/mbessler/imidj)
 [![Coverity Scan Build Status](https://scan.coverity.com/projects/20112/badge.svg)](https://scan.coverity.com/projects/mbessler-imidj)
 
 # imidj - IMage Incremental Deltafragment Joiner
