@@ -219,8 +219,8 @@ gboolean parse_chidx(gchar *chidx_filename, chidx_hdr_t * hdr, chidx_hdr2_t ** h
     hdr->winsize          = g_ntohl(hdr->winsize);
     hdr->chunkmask        = g_ntohl(hdr->chunkmask);
     hdr->minchunksize     = g_ntohl(hdr->minchunksize);
-    hdr->fullfilehash_len = g_ntohs(MIN(hdr->fullfilehash_len, hashsize_largest()) /* CID-1593966 */);
-    hdr->chunkhash_len    = g_ntohs(MIN(hdr->chunkhash_len, hashsize_largest()) /* CID-1593966 */);
+    hdr->fullfilehash_len = MIN(g_ntohs(hdr->fullfilehash_len), hashsize_largest() /* CID-1593966 */);
+    hdr->chunkhash_len    = MIN(g_ntohs(hdr->chunkhash_len), hashsize_largest() /* CID-1593966 */);
 
     /* determine chidx file format version before accessing more fields */
     switch(hdr->formatversion) {
