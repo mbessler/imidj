@@ -77,7 +77,7 @@ static uint32_t buzhash_update(uint32_t sum, unsigned char remove, unsigned char
 
 Chunker * chunker_init(int window_size, int chunk_mask, int min_size, uint32_t seed)
 {
-    Chunker *c = calloc(sizeof(Chunker), 1);
+    Chunker *c = calloc(1, sizeof(Chunker));
     c->window_size = window_size;
     c->chunk_mask = chunk_mask;
     c->min_size = min_size;
